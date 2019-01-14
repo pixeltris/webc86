@@ -4,3 +4,4 @@ Try it out here https://pixeltris.github.io/webc86
 
 TODO:
 - Create a WebAssembly version by rewriting the emulator in C and compiling with emscripten. This should hopefully help out with performance (which currently sucks) and fix the various issues related to using JavaScript.
+- Debugging tools (disassembler, breakpoints, memory view, etc)
