@@ -1,0 +1,86 @@
+<html>
+	<head>
+		<!--<script src="test.js"></script>-->
+		<script src="utils.js"></script>
+		<script src="sprintf.js"></script>
+		<script src="memmgr.js"></script>
+		<script src="MemMgr.js"></script>
+		<script src="FileSystem.js"></script>
+		<script src="tcc.js"></script>
+		
+		
+		<script src="v86_cpu.js"></script>
+		<script src="v86_arith.js"></script>
+		<script src="v86_fpu.js"></script>
+		<script src="v86_instructions.js"></script>
+		<script src="v86_modrm.js"></script>
+		
+		
+		<!--
+		<script src="x86emu_cpu.js"></script>
+		<script src="x86emu_fpu.js"></script>
+		-->
+		
+		<script src="cpu_shared.js"></script>
+		<script src="func_imports.js"></script>
+		<script src="webc86.js"></script>
+	</head>
+	<body style="padding:0px; margin:0px;">
+		<textarea spellcheck="false" id="output" style="width:50%; height:100%; float:left;"></textarea>
+		<div style="width:50%; height:100%; float:left;">
+			<div style="height:30px;">
+				<!--<input type="checkbox" checked=checked onclick="useTypedArrays=this.checked;alert(useTypedArrays);">Use typed arrays</input>-->
+				<button onclick="isCompiling = true; main();">compile</button>
+				<button onclick="isCompiling = false; main();">run</button>
+				<button onclick="dumpExe();">dump exe</button>
+				<button onclick="saveExe();">save exe</button>
+			</div>
+			<textarea spellcheck="false" id="code" style="width:100%; height:calc(100% - 30px); display:flex; float:left;">
+// TCC is used to compile the following C code to a x86 windows exe
+//
+// - #include directives aren't supported
+// - floating point values aren't supported
+// - large long long values will print incorrectly
+// - there are likely many other issues
+
+int printf(const char *_Format,...);
+int sprintf(char *_Dest,const char *_Format,...);
+
+typedef int (*AddFunc)(int a, int b);
+
+int SimpleAdd(int a, int b)
+{
+    return a + b;
+}
+
+int main()
+{
+    printf("main() address: 0x%p\n", &main);
+    printf("SimpleAdd() address: 0x%p\n", &SimpleAdd);
+    
+    AddFunc func = &SimpleAdd;
+    
+    int addr = (int)&SimpleAdd;
+    AddFunc func2 = (AddFunc)addr;
+    
+    int v1 = 500;
+    int v2 = 300;
+    unsigned long long val1 = 33333333333333;
+    unsigned long long val2 = 2;
+    
+    char buff[256];
+    sprintf(buff, "500+300=%d 99+1=%d 33333333333333*2=%llu", func(v1, v2), func2(99, 1), val1 * val2);
+    
+    printf("Hello C! %s\n", buff);
+    
+    unsigned char byte1 = *(((unsigned char*)&main) + 0);
+    unsigned char byte2 = *(((unsigned char*)&main) + 1);
+    unsigned char byte3 = *(((unsigned char*)&main) + 2);
+    printf("First 3 bytes of main(): 0x%x 0x%x 0x%x\n", byte1, byte2, byte3);
+    printf("- The result should be 0x55 0x89 0xE5 which is PUSH EBP / MOV EBP, ESP\n");
+    
+    return 0;
+}</textarea>
+		</div>
+	</body>
+</html>
