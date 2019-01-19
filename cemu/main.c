@@ -357,6 +357,9 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
             reloc = (IMAGE_BASE_RELOCATION*)((uint8_t*)reloc + reloc->SizeOfBlock);
         }
     }
+    
+    // Initialize the API imports (dll functions used by the target binary, which we need to provide implementations for)
+    cpu_init_imports(cpu);
 
     // Handle dll imports
     IMAGE_DATA_DIRECTORY importDescriptorDataDir = ntHeader.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
@@ -403,6 +406,7 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
                 // NOTE: The following doesn't allow for advanced situations where there are dll relocations or non standard thunk values 
                 //       (it expects that both FirstThunk and OriginalFirstThunk are assigned properly in the file data).
                 //These are really IMAGE_THUNK_DATA*
+                DWORD firstThunk = importDescriptor->FirstThunk;
                 DWORD* thunkData = (DWORD*)(virtualProcessMemory + importDescriptor->FirstThunk);
                 DWORD* originalThunkData = (DWORD*)(virtualProcessMemory + importDescriptor->OriginalFirstThunk);
 
@@ -441,15 +445,11 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
                         }
                         else
                         {
+                            import->ThunkAddress = (uint32_t)(ntHeader.OptionalHeader.ImageBase + ((size_t)thunkData - (size_t)virtualProcessMemory));
                             printf("Resolved import %s %s\n", importDllName, importName);
                         }
 
-                        // This wont work when running from an x64 process and the callback is a higher address than uint32
-                        // - The correct solution is to redesign how the emulated process calls our real functions. We could
-                        //   generate a fake function in x86 which holds the address of our target callback. That fake function 
-                        //   could have a special instruction specifically designed to call a real function address. We would
-                        //   point thunkData to the generated x86 function instead of our callback.
-                        *thunkData = (DWORD)(import) | 0x80000000;
+                        *thunkData = (DWORD)cpu_get_virtual_address(cpu, (size_t)import);
                     }
                     
                     thunkData++;
@@ -480,7 +480,7 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
 
 int main()
 {
-    const char* fileName = "C:\\emutest.exe";
+    const char* fileName = "C:\\main.exe";
     
     CPU cpu;
     memset(&cpu, 0, sizeof(CPU));
@@ -496,35 +496,37 @@ int main()
     }
     printf("Total memory size: %08x (%llu)\n", totalMemorySize, (uint64_t)totalMemorySize);
     
-    // Initialize the API imports (dll functions used by the target binary, which we need to provide implementations for)
-    cpu_init_imports(&cpu);
-    
     ExeLoadResult loadResult;
     load_win32_exe(&cpu, &loadResult, "test", fileName);
-    if (loadResult.ErrorCode != 0)
+    if (loadResult.ErrorCode != 0 || cpu.ErrorCode != 0)
     {
         printf("Load exe failed.\n");
         getchar();
         return 1;
     }
     
-    printf("EOP: %x\n", loadResult.AddressOfEntryPoint);
+    printf("EOP: 0x%08X\n", loadResult.VirtualAddressOfEntryPoint);
     
-    if (cpu_init(&cpu, loadResult.VirtualAddress, loadResult.VirtualAddressOfEntryPoint, loadResult.ImageSize, (int32_t)heapSize, (int32_t)stackSize) != 0)
+    cpu_init(&cpu, (uint32_t)loadResult.VirtualAddress, (uint32_t)loadResult.VirtualAddressOfEntryPoint, (uint32_t)loadResult.ImageSize, (uint32_t)heapSize, (uint32_t)stackSize);
+    if (cpu.ErrorCode != 0)
     {
         printf("cpu_init failed.\n");
+        getchar();
         return 2;
     }
     
-    while (!cpu.Complete)
+    if (cpu_setjmp(&cpu) == 0 && cpu.ErrorCode == 0)
     {
-        cpu_execute_instruction(&cpu);
+        while (!cpu.Complete)
+        {
+            cpu_execute_instruction(&cpu);
+        }
     }
     
     cpu_destroy(&cpu);
     memmgr_destroy(&cpu.Memory);
     
-    if (cpu.Error == 0)
+    if (cpu.ErrorCode == 0)
     {
         printf("done\n");
     }
