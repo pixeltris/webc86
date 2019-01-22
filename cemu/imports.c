@@ -2,7 +2,7 @@
 
 void OnUnresolvedImportCalled(CPU* cpu)
 {
-    printf("[WARNING] Unresolved dll import function called! ret: 0x%08X\n", cpu_get_eip(cpu));
+    printf("[WARNING] Unresolved dll import function called! ret: 0x%08X\n", cpu->EIP);
 }
 
 void import_exit(CPU* cpu)

@@ -4,7 +4,10 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <setjmp.h>
+#include <stdio.h>
 #include "memmgr.h"
+
+#define CPU_WITH_DEBUG 1
 
 typedef struct tCPU CPU;
 
@@ -44,10 +47,20 @@ struct tCPU
     ImportInfo* UnhandledFunctionImport;// The fallback import handler
     uint32_t ImportsBeginAddress;// The address of where the imports start (virtul address)
     uint32_t ImportsEndAddress;// The address of where the imports end (virtul address) (ImportsBeginAddress + imports buffer size)
+
+    uint32_t EIP;
     
-    // An offset into the virtualMemory array so that we don't have to keep calculating the offset each time EIP modified
-    // Use cpu_get_eip() / cpu_set_eip() to access the regular version of the EIP
-    uint32_t MemEIP;
+    int32_t Prefixes;
+    int32_t Flags;
+    int32_t FlagsChanged;
+    int32_t LastOp1;
+    int32_t LastOp2;
+    int32_t LastOpSize;
+    int32_t LastAddResult;
+    int32_t LastResult;
+    uint8_t ModRM;
+    size_t PhysAddr;
+    int32_t Reg[8];
     
     jmp_buf JmpBuf;
     int32_t JmpBufInitialized;
@@ -65,17 +78,55 @@ ImportInfo* cpu_find_import(CPU* cpu, const char* targetName, const char* dllNam
 void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, uint32_t imageSize, uint32_t heapSize, uint32_t stackSize);
 void cpu_destroy(CPU* cpu);
 int32_t cpu_setjmp(CPU* cpu);
-void cpu_onerror(CPU* cpu, char* error);
+void cpu_onerror(CPU* cpu, char* error, ...);
+#if CPU_WITH_DEBUG
+void cpu_dbg_assert(CPU* cpu, int32_t cond, char* msg);
+#else
+#define cpu_dbg_assert(cpu, cond, msg)
+#endif
+
+int32_t cpu_is_osize_32(CPU* cpu);
+int32_t cpu_is_asize_32(CPU* cpu);
+int32_t cpu_modrm_resolve(CPU* cpu, uint8_t modrm);
 
 uint32_t cpu_get_virtual_address(CPU* cpu, size_t realAddress);
 size_t cpu_get_real_address(CPU* cpu, uint32_t virtualAddress);
 void cpu_validate_address(CPU* cpu, uint32_t address);
-uint32_t cpu_readI32(CPU* cpu, uint32_t address);
-void cpu_writeU32(CPU* cpu, uint32_t address, uint32_t value);
 
-uint32_t cpu_get_eip(CPU* cpu);
-void cpu_set_eip(CPU* cpu, uint32_t eip);
+uint8_t cpu_fetch_modrm(CPU* cpu);
+
+int8_t cpu_fetchI8(CPU* cpu);
+int16_t cpu_fetchI16(CPU* cpu);
+int32_t cpu_fetchI32(CPU* cpu);
+int64_t cpu_fetchI64(CPU* cpu);
+uint8_t cpu_fetchU8(CPU* cpu);
+uint16_t cpu_fetchU16(CPU* cpu);
+uint32_t cpu_fetchU32(CPU* cpu);
+uint64_t cpu_fetchU64(CPU* cpu);
+
+int8_t cpu_readI8(CPU* cpu, uint32_t address);
+int16_t cpu_readI16(CPU* cpu, uint32_t address);
+int32_t cpu_readI32(CPU* cpu, uint32_t address);
+int64_t cpu_readI64(CPU* cpu, uint32_t address);
+uint8_t cpu_readU8(CPU* cpu, uint32_t address);
+uint16_t cpu_readU16(CPU* cpu, uint32_t address);
+uint32_t cpu_readU32(CPU* cpu, uint32_t address);
+uint64_t cpu_readU64(CPU* cpu, uint32_t address);
+
+void cpu_writeI8(CPU* cpu, uint32_t address, int8_t value);
+void cpu_writeI16(CPU* cpu, uint32_t address, int16_t value);
+void cpu_writeI32(CPU* cpu, uint32_t address, int32_t value);
+void cpu_writeI64(CPU* cpu, uint32_t address, int64_t value);
+void cpu_writeU8(CPU* cpu, uint32_t address, uint8_t value);
+void cpu_writeU16(CPU* cpu, uint32_t address, uint16_t value);
+void cpu_writeU32(CPU* cpu, uint32_t address, uint32_t value);
+void cpu_writeU64(CPU* cpu, uint32_t address, uint64_t value);
 
 void cpu_execute_instruction(CPU* cpu);
+void cpu_execute_prefix_instruction(CPU* cpu);
+void cpu_execute_instruction_t16(CPU* cpu);
+void cpu_execute_instruction_t32(CPU* cpu);
+void cpu_execute_instruction_0F_t16(CPU* cpu);
+void cpu_execute_instruction_0F_t32(CPU* cpu);
 
 #endif
