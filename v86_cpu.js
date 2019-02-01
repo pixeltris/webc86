@@ -845,3 +845,23 @@ CPU.prototype.test_le = function()
     //    return this.last_add_result <= this.last_op2;
     return this.getzf() || !this.getsf() !== !this.getof();
 };
+
+CPU.prototype.xchg16 = function(memory_data, modrm_byte)
+{
+    var mod = modrm_byte >> 3 & 7,
+        tmp = this.reg32[mod] & SIZE_MASK_16;
+    
+    this.reg32[mod] = memory_data & SIZE_MASK_16;
+    
+    return tmp;
+};
+
+CPU.prototype.xchg32 = function(memory_data, modrm_byte)
+{
+    var mod = modrm_byte >> 3 & 7,
+        tmp = this.reg32[mod];
+    
+    this.reg32[mod] = memory_data;
+    
+    return tmp;
+};

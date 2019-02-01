@@ -33,7 +33,7 @@ function genTables(cpu)
     t16[0x2b] = function() { cpu.read_modrm_byte(); cpu.write_g16(cpu.sub16(cpu.read_g16(), cpu.read_e16())); };
     t32[0x2b] = function() { cpu.read_modrm_byte(); cpu.write_g32(cpu.sub32(cpu.read_g32s(), cpu.read_e32s())); };
     t16[0x2d] = function() { cpu.setReg16(reg_eax, cpu.sub16(cpu.getReg16(reg_eax), cpu.read_op16())); };
-    t32[0x2d] = function() { cpu.setRead32s(reg_eax, cpu.sub32(cpu.getReg32s(reg_eax), cpu.read_op32s())); };
+    t32[0x2d] = function() { cpu.setReg32s(reg_eax, cpu.sub32(cpu.getReg32s(reg_eax), cpu.read_op32s())); };
 
     t16[0x31] = function() { cpu.read_modrm_byte(); cpu.write_e16(cpu.xor16(cpu.read_write_e16(), cpu.read_g16())); };
     t32[0x31] = function() { cpu.read_modrm_byte(); cpu.write_e32(cpu.xor32(cpu.read_write_e32(), cpu.read_g32s())); };
