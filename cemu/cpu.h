@@ -74,6 +74,26 @@ typedef struct
     uint32_t ThunkAddress;
 } ImportInfo;
 
+typedef union
+{
+    long double fp;
+    uint8_t b[10];
+    uint16_t s[4];
+    uint32_t i[2];
+    uint64_t ll;
+} FPURegister;
+
+typedef struct
+{
+    FPURegister St[8];
+    int32_t StackEmpty;
+    int32_t StackPtr;
+    int32_t ControlWord;
+    int32_t StatusWord;
+    float Float32;
+    double Float64;
+} FPU;
+
 struct tCPU
 {
     // NOTE: There is slightly less heap than allocated due to the headers on each block in MemMgr
@@ -97,6 +117,8 @@ struct tCPU
     uint32_t ImportsBeginAddress;// The address of where the imports start (virtul address)
     uint32_t ImportsEndAddress;// The address of where the imports end (virtul address) (ImportsBeginAddress + imports buffer size)
 
+    FPU Fpu;
+    
     uint32_t EIP;
     
     int32_t Prefixes;
@@ -133,6 +155,11 @@ void cpu_dbg_assert(CPU* cpu, int32_t cond, char* msg);
 #else
 #define cpu_dbg_assert(cpu, cond, msg)
 #endif
+
+void cpu_print_callstack(CPU* cpu, int32_t maxFrames);
+void cpu_check_stack_memory(CPU* cpu);
+void cpu_exec_call(CPU* cpu, uint32_t addr);
+int32_t cpu_exec_check_jump_function(CPU* cpu, uint32_t addr);
 
 uint32_t cpu_get_stack_reg(CPU* cpu);
 void cpu_set_stack_reg(CPU* cpu, uint32_t value);
@@ -171,10 +198,12 @@ void cpu_push16(CPU* cpu, uint16_t val);
 void cpu_push32(CPU* cpu, uint32_t val);
 uint16_t cpu_pop16(CPU* cpu);
 int32_t cpu_pop32s(CPU* cpu);
+uint32_t cpu_pop32(CPU* cpu);
 
 void cpu_trigger_de(CPU* cpu);
 void cpu_trigger_ud(CPU* cpu);
 
+int32_t cpu_is_valid_address(CPU* cpu, uint32_t addr, int32_t size);
 uint32_t cpu_get_virtual_address(CPU* cpu, size_t realAddress);
 size_t cpu_get_real_address(CPU* cpu, uint32_t virtualAddress);
 void cpu_validate_address(CPU* cpu, uint32_t address);
@@ -185,6 +214,7 @@ uint8_t cpu_read_sib(CPU* cpu);
 uint8_t cpu_read_op8(CPU* cpu);
 int8_t cpu_read_op8s(CPU* cpu);
 uint16_t cpu_read_op16(CPU* cpu);
+int16_t cpu_read_op16s(CPU* cpu);
 int32_t cpu_read_op32s(CPU* cpu);
 uint8_t cpu_read_disp8(CPU* cpu);
 int8_t cpu_read_disp8s(CPU* cpu);

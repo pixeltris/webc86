@@ -840,18 +840,103 @@ int32_t cpu_shld32(CPU* cpu, int32_t dest_operand, int32_t source_operand, int32
     return cpu->LastResult;
 }
 
-int32_t cpu_integer_round(CPU* cpu, double f, int32_t rc)
+int32_t cpu_integer_round(CPU* cpu, long double f, int32_t rc)
 {
     if (rc == 0)
     {
-        return (int32_t)round(f);
+        return (int32_t)roundl(f);
     }
     else if (rc == 1 || (rc == 3 && f > 0))
     {
-        return (int32_t)floor(f);
+        return (int32_t)floorl(f);
     }
     else
     {
-        return (int32_t)ceil(f);
+        return (int32_t)ceill(f);
+    }
+}
+
+uint8_t cpu_int_log2_table[256];
+void cpu_init_int_log2_table()
+{
+    for (int32_t i = 0, b = -2; i < 256; i++)
+    {
+        if (!(i & i - 1))
+        {
+            b++;
+        }
+        
+        cpu_int_log2_table[i] = (uint8_t)b;
+    }
+}
+
+uint8_t cpu_int_log2_byte(uint8_t x)
+{
+    return cpu_int_log2_table[x];
+}
+
+uint32_t cpu_int_log2(uint32_t x)
+{
+    uint32_t tt = x >> 16;
+    uint32_t t = tt >> 8;
+    
+    if (tt)
+    {
+        if (t)
+        {
+            return 24 + cpu_int_log2_table[t];
+        }
+        else
+        {
+            return 16 + cpu_int_log2_table[tt];
+        }
+    }
+    else
+    {
+        if (t)
+        {
+            return 8 + cpu_int_log2_table[t];
+        }
+        else
+        {
+            return cpu_int_log2_table[tt];
+        }
+    }
+    return 0;
+}
+
+uint16_t cpu_bsr16(CPU* cpu, uint16_t old, uint16_t bit_base)
+{
+    cpu->FlagsChanged = FLAGS_ALL & ~FLAG_ZERO;
+    cpu->LastOpSize = OPSIZE_16;
+
+    if (bit_base == 0)
+    {
+        cpu->Flags |= FLAG_ZERO;
+        cpu->LastResult = bit_base;
+        return old;
+    }
+    else
+    {
+        cpu->Flags &= ~FLAG_ZERO;
+        return (uint16_t)(cpu->LastResult = cpu_int_log2(bit_base));
+    }
+}
+
+uint32_t cpu_bsr32(CPU* cpu, uint32_t old, uint32_t bit_base)
+{
+    cpu->FlagsChanged = FLAGS_ALL & ~FLAG_ZERO;
+    cpu->LastOpSize = OPSIZE_32;
+
+    if (bit_base == 0)
+    {
+        cpu->Flags |= FLAG_ZERO;
+        cpu->LastResult = bit_base;
+        return old;
+    }
+    else
+    {
+        cpu->Flags &= ~FLAG_ZERO;
+        return (uint32_t)(cpu->LastResult = cpu_int_log2(bit_base));
     }
 }

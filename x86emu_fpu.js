@@ -627,11 +627,11 @@ FPU.prototype.fpu_op_DC_reg = function(imm8)
     {
         case 0:
             // fadd
-            this.fpu_st[this.low_ptr] = sti + st0;
+            this.fpu_st[low_ptr] = sti + st0;
             break;
         case 1:
             // fmul
-            this.fpu_st[this.low_ptr] = sti * st0;
+            this.fpu_st[low_ptr] = sti * st0;
             break;
         case 2:
             // fcom
@@ -644,19 +644,19 @@ FPU.prototype.fpu_op_DC_reg = function(imm8)
             break;
         case 4:
             // fsubr
-            this.fpu_st[this.low_ptr] = st0 - sti;
+            this.fpu_st[low_ptr] = st0 - sti;
             break;
         case 5:
             // fsub
-            this.fpu_st[this.low_ptr] = sti - st0;
+            this.fpu_st[low_ptr] = sti - st0;
             break;
         case 6:
             // fdivr
-            this.fpu_st[this.low_ptr] = st0 / sti;
+            this.fpu_st[low_ptr] = st0 / sti;
             break;
         case 7:
             // fdiv
-            this.fpu_st[this.low_ptr] = sti / st0;
+            this.fpu_st[low_ptr] = sti / st0;
             break;
         default:
             return 0;
@@ -740,7 +740,7 @@ FPU.prototype.fpu_op_DD_reg = function(imm8)
             break;
         case 5:
             // fucomp
-            this.fpu_fucom(this.cpu_get_sti(low));
+            this.fpu_fucom(this.fpu_get_sti(low));
             this.fpu_pop();
             break;
         default:
@@ -807,7 +807,7 @@ FPU.prototype.fpu_op_DE_reg = function(imm8)
             else
             {
                 // not a valid encoding
-                throw "fpu invalid instruction encoding for fcompp at " + addr.toString(16);
+                throw "fpu invalid instruction encoding for fcompp at " + this.cpu.get_eip().toString(16);
             }
             break;
         case 4:

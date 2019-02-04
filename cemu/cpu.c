@@ -2,8 +2,16 @@
 #include "memmgr.h"
 #include <stdarg.h>
 
+int32_t cpu_first_init = 1;
+
 void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, uint32_t imageSize, uint32_t heapSize, uint32_t stackSize)
 {
+    if (cpu_first_init)
+    {
+        cpu_first_init = 0;
+        cpu_init_int_log2_table();
+    }
+    
     cpu->VirtualMemory = (uint8_t*)cpu->Memory.Pool;
     cpu->VirtualMemoryAddress = virtualAddress;
     cpu->VirtualMemorySize = (uint32_t)cpu->Memory.PoolSizeInBytes;
@@ -74,12 +82,94 @@ void cpu_dbg_assert(CPU* cpu, int32_t cond, char* msg)
     {
         if (msg != NULL)
         {
-            printf("%s", msg);
+            cpu_onerror(cpu, "%s\n", msg);
         }
-        cpu_onerror(cpu, NULL);
+        else
+        {
+            cpu_onerror(cpu, NULL);
+        }
     }
 }
 #endif
+
+void cpu_print_callstack(CPU* cpu, int32_t maxFrames)
+{
+    uint32_t ebp = (uint32_t)cpu->Reg[REG_EBP];
+    printf("callstack: ");
+    for (int32_t i = 0; i < maxFrames; i++)
+    {
+        uint32_t eip = cpu_readU32(cpu, ebp + 4);
+        if (!cpu_is_valid_address(cpu, eip, 1))
+        {
+            break;
+        }
+        ebp = cpu_readU32(cpu, ebp);
+        
+        if (i != 0)
+        {
+            printf(", ");
+        }
+        printf("0x%08X", eip);
+    }
+    printf("\n");
+}
+
+void cpu_check_stack_memory(CPU* cpu)
+{
+    uint32_t esp = (uint32_t)cpu->Reg[REG_ESP];
+    if (esp < cpu->VirtualMemoryStackAddress)
+    {
+        uint32_t overflowAmount = (uint32_t)(cpu->VirtualMemoryStackAddress - esp);
+        cpu_onerror(cpu, "Emulator encountered a stack overflow (%u byte(s))", overflowAmount);
+    }
+    else if (esp >= cpu->VirtualMemoryStackEndAddress)
+    {
+        uint32_t underflowAmount = (uint32_t)(esp - cpu->VirtualMemoryStackEndAddress);
+        cpu_onerror(cpu, "Emulator encountered a stack underflow (%u byte(s))", underflowAmount);
+    }
+}
+
+void cpu_exec_call(CPU* cpu, uint32_t addr)
+{
+    if (addr >= cpu->VirtualMemoryAddress && addr < cpu->VirtualMemoryEndAddress)
+    {
+        if (addr < cpu->ImportsEndAddress && addr >= cpu->ImportsBeginAddress)
+        {
+            // Function import call
+            ImportInfo* import = (ImportInfo*)cpu_get_real_address(cpu, addr);
+            import->Callback(cpu);
+        }
+        else
+        {
+            cpu_push32(cpu, cpu->EIP);
+            cpu->EIP = addr;
+        }
+    }
+    cpu_onerror(cpu, "exec_call invalid function address 0x%08X EIP: 0x%08X", addr, cpu->EIP);
+}
+
+int32_t cpu_exec_check_jump_function(CPU* cpu, uint32_t addr)
+{
+    if (addr >= cpu->VirtualMemoryAddress && addr < cpu->VirtualMemoryEndAddress)
+    {
+        if (addr < cpu->ImportsEndAddress && addr >= cpu->ImportsBeginAddress)
+        {
+            // Get the return address into eip
+            cpu->EIP = cpu_pop32(cpu);
+            
+            // Function import call
+            ImportInfo* import = (ImportInfo*)cpu_get_real_address(cpu, addr);
+            import->Callback(cpu);
+            return 1;
+        }
+        else
+        {
+            return 0;
+        }
+    }
+    cpu_onerror(cpu, "cpu_exec_check_jump_function invalid function address 0x%08X EIP: 0x%08X", addr, cpu->EIP);
+    return 0;
+}
 
 uint32_t cpu_get_stack_reg(CPU* cpu)
 {
@@ -270,6 +360,11 @@ int32_t cpu_pop32s(CPU* cpu)
     return result;
 }
 
+uint32_t cpu_pop32(CPU* cpu)
+{
+    return (uint32_t)cpu_pop32s(cpu);
+}
+
 void cpu_trigger_de(CPU* cpu)
 {
     cpu_onerror(cpu, "trigger_de\n");
@@ -295,6 +390,11 @@ void cpu_execute_prefix_instruction(CPU* cpu)
     {
         cpu_execute_instruction_t16(cpu);
     }
+}
+
+int32_t cpu_is_valid_address(CPU* cpu, uint32_t addr, int32_t size)
+{
+    return addr >= cpu->VirtualMemoryAddress && addr < cpu->VirtualMemoryEndAddress;
 }
 
 uint32_t cpu_get_virtual_address(CPU* cpu, size_t realAddress)
@@ -338,6 +438,11 @@ int8_t cpu_read_op8s(CPU* cpu)
 uint16_t cpu_read_op16(CPU* cpu)
 {
     return cpu_fetchU16(cpu);
+}
+
+int16_t cpu_read_op16s(CPU* cpu)
+{
+    return cpu_fetchI16(cpu);
 }
 
 int32_t cpu_read_op32s(CPU* cpu)

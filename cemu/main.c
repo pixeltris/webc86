@@ -486,7 +486,7 @@ int main()
     memset(&cpu, 0, sizeof(CPU));
     
     const size_t heapSize = 0x1000000;// 16MB - Heap size (the stack size gets added to this to produce the final memory size)
-    const size_t stackSize  = 0x100000;// 1MB - Total number of bytes in the stack (excluding any padding)
+    const size_t stackSize  = 0x100000;// 1MB - Total number of bytes in the stack
     const size_t totalMemorySize = heapSize + stackSize;
     if (memmgr_init(&cpu.Memory, totalMemorySize) != 0)
     {
