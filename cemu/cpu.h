@@ -142,9 +142,9 @@ struct tCPU
 
 void cpu_init_imports(CPU* cpu);
 void cpu_allocate_data_imports(CPU* cpu);
-ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, FuncImportCallbackSig function, uint32_t dataSize, uint32_t dataAddress);
+ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, FuncImportCallbackSig function, uint32_t dataSize);
 ImportInfo* cpu_define_import(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, FuncImportCallbackSig function);
-ImportInfo* cpu_define_data_import(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, uint32_t dataSize, uint32_t dataAddress);
+ImportInfo* cpu_define_data_import(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, uint32_t dataSize);
 ImportInfo* cpu_find_import(CPU* cpu, const char* targetName, const char* dllName, const char* name);
 
 void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, uint32_t imageSize, uint32_t heapSize, uint32_t stackSize);
@@ -204,7 +204,7 @@ void cpu_trigger_de(CPU* cpu);
 void cpu_trigger_ud(CPU* cpu);
 
 int32_t cpu_is_valid_address(CPU* cpu, uint32_t addr, int32_t size);
-uint32_t cpu_get_virtual_address(CPU* cpu, size_t realAddress);
+uint32_t cpu_get_virtual_address(CPU* cpu, void* realAddress);
 size_t cpu_get_real_address(CPU* cpu, uint32_t virtualAddress);
 void cpu_validate_address(CPU* cpu, uint32_t address);
 

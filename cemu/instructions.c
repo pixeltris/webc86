@@ -583,7 +583,7 @@ void cpu_execute_instruction_t32(CPU* cpu)
     {
         case 0x01:
             cpu_fetch_modrm(cpu);
-            cpu_write_e32(cpu, cpu_add32(cpu, cpu_read_write_e16(cpu), cpu_read_g32s(cpu)));
+            cpu_write_e32(cpu, cpu_add32(cpu, cpu_read_write_e32(cpu), cpu_read_g32s(cpu)));
             break;
         case 0x09:
             cpu_fetch_modrm(cpu);

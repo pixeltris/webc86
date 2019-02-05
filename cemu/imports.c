@@ -1,13 +1,72 @@
 #include "cpu.h"
+#include <string.h>
 
-void OnUnresolvedImportCalled(CPU* cpu)
+void import_unresolved(CPU* cpu)
 {
-    printf("[WARNING] Unresolved dll import function called! ret: 0x%08X\n", cpu->EIP);
+    printf("[WARNING] Unresolved dll import called! ret: 0x%08X\n", cpu->EIP);
+}
+
+void import_ignore(CPU* cpu)
+{
+    // Ignored import
 }
 
 void import_exit(CPU* cpu)
 {
     cpu->Complete = 1;
+}
+
+void import_getmainargs(CPU* cpu)
+{
+    uint32_t argcAddr = cpu_readU32(cpu, cpu_get_esp(cpu, 0));
+    uint32_t argvAddr = cpu_readU32(cpu, cpu_get_esp(cpu, 4));
+    uint32_t envAddr = cpu_readU32(cpu, cpu_get_esp(cpu, 8));
+    int32_t doWildCard = cpu_readI32(cpu, cpu_get_esp(cpu, 12));
+    uint32_t startInfoAddr = cpu_readU32(cpu, cpu_get_esp(cpu, 16));
+    
+    char* args[3];
+    args[0] = "binary_path.exe";
+    args[1] = "arg1";
+    args[2] = "arg2";
+    int32_t numArgs = (int32_t)(sizeof(args) / sizeof(args[0]));
+    
+    int32_t argsBufferLen = 0;
+    for (int32_t i = 0; i < numArgs; i++)
+    {
+        argsBufferLen += strlen(args[i]) + 1;
+    }
+    
+    char* argsBuffer = (char*)memmgr_alloc(&cpu->Memory, argsBufferLen);
+    uint32_t* argsPointers = (uint32_t*)memmgr_alloc(&cpu->Memory, numArgs * 4);
+    if (argsBuffer == NULL || argsPointers == NULL)
+    {
+        cpu_onerror(cpu, "Failed to allocate memory for __getmainargs\n");
+    }
+    
+    char* ptr = argsBuffer;
+    for (int32_t i = 0; i < numArgs; i++)
+    {
+        cpu_writeU32(cpu, cpu_get_virtual_address(cpu, argsPointers + i), cpu_get_virtual_address(cpu, ptr));
+        int32_t argLen = strlen(args[i]) + 1;
+        memcpy(ptr, args[i], argLen);
+        ptr += argLen;
+    }
+    
+    cpu_writeI32(cpu, argcAddr, numArgs);
+    cpu_writeU32(cpu, argvAddr, cpu_get_virtual_address(cpu, argsPointers));
+    cpu_writeU32(cpu, envAddr, 0);
+    
+    cpu->Reg[REG_EAX] = 0;
+}
+
+void import_printf(CPU* cpu)
+{
+    char* fmt = (char*)cpu_get_real_address(cpu, cpu_readU32(cpu, cpu_get_esp(cpu, 0)));
+    uint8_t* args = (uint8_t*)cpu_get_real_address(cpu, cpu_get_esp(cpu, 4));
+    
+    // %s needs to be mapped from virtual to real addresses
+    
+    printf("%s", fmt);
 }
 
 void cpu_init_user_defined_imports(CPU* cpu, int32_t* counter)
@@ -16,7 +75,16 @@ void cpu_init_user_defined_imports(CPU* cpu, int32_t* counter)
 
 void cpu_init_common_imports(CPU* cpu, int32_t* counter)
 {
+    cpu_define_import(cpu, counter, NULL, "msvcrt.dll", "__set_app_type", import_ignore);
+    cpu_define_import(cpu, counter, NULL, "msvcrt.dll", "_controlfp", import_ignore);
     cpu_define_import(cpu, counter, NULL, "msvcrt.dll", "exit", import_exit);
+    cpu_define_import(cpu, counter, NULL, "msvcrt.dll", "__getmainargs", import_getmainargs);
+    cpu_define_import(cpu, counter, NULL, "msvcrt.dll", "printf", import_printf);
+    
+    cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "__argc", 4);
+    cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "__argv", 4);
+    cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "_environ", 4);
+    cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "_iob", 32 * 20);// 20 FILE entries
 }
 
 void cpu_init_imports(CPU* cpu)
@@ -39,14 +107,14 @@ void cpu_init_imports(CPU* cpu)
                 cpu_onerror(cpu, "Failed to allocate memory for imports\n");
                 return;
             }
-            cpu->ImportsBeginAddress = cpu_get_virtual_address(cpu, (size_t)cpu->Imports);
-            cpu->ImportsEndAddress = cpu_get_virtual_address(cpu, ((size_t)cpu->Imports) + memSize);
+            cpu->ImportsBeginAddress = cpu_get_virtual_address(cpu, cpu->Imports);
+            cpu->ImportsEndAddress = cpu_get_virtual_address(cpu, (void*)(((size_t)cpu->Imports) + memSize));
             
             // Set up the handler for unhandled imports
             cpu->Imports[0].TargetBinaryName = NULL;
             cpu->Imports[0].DllName = NULL;
             cpu->Imports[0].Name = NULL;
-            cpu->Imports[0].Callback = OnUnresolvedImportCalled;
+            cpu->Imports[0].Callback = import_unresolved;
             cpu->Imports[0].DataSize = 0;
             cpu->Imports[0].DataAddress = 0;
             cpu->Imports[0].ThunkAddress = 0;
@@ -85,14 +153,14 @@ void cpu_allocate_data_imports(CPU* cpu)
                     cpu_onerror(cpu, "Failed to allocate memory for import\n");
                     return;
                 }
-                cpu->Imports[i].DataAddress = cpu_get_virtual_address(cpu, (size_t)ptr);
+                cpu->Imports[i].DataAddress = cpu_get_virtual_address(cpu, ptr);
                 cpu_writeU32(cpu, cpu->Imports[i].ThunkAddress, cpu->Imports[i].DataAddress);
             }
         }
     }
 }
 
-ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, FuncImportCallbackSig function, uint32_t dataSize, uint32_t dataAddress)
+ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, FuncImportCallbackSig function, uint32_t dataSize)
 {
     if (dllName != NULL && name != NULL)
     {
@@ -106,7 +174,7 @@ ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* targetN
             cpu->Imports[index].Name = name;
             cpu->Imports[index].Callback = function;
             cpu->Imports[index].DataSize = dataSize;
-            cpu->Imports[index].DataAddress = dataAddress;
+            cpu->Imports[index].DataAddress = 0;
             cpu->Imports[index].ThunkAddress = 0;
             return &cpu->Imports[index];
         }
@@ -116,12 +184,12 @@ ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* targetN
 
 ImportInfo* cpu_define_import(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, FuncImportCallbackSig function)
 {
-    return cpu_define_import_ex(cpu, counter, targetName, dllName, name, function, 0, 0);
+    return cpu_define_import_ex(cpu, counter, targetName, dllName, name, function, 0);
 }
 
-ImportInfo* cpu_define_data_import(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, uint32_t dataSize, uint32_t dataAddress)
+ImportInfo* cpu_define_data_import(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, uint32_t dataSize)
 {
-    return cpu_define_import_ex(cpu, counter, targetName, dllName, name, NULL, dataSize, dataAddress);
+    return cpu_define_import_ex(cpu, counter, targetName, dllName, name, NULL, dataSize);
 }
 
 ImportInfo* cpu_find_import(CPU* cpu, const char* targetName, const char* dllName, const char* name)

@@ -449,7 +449,7 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
                             printf("Resolved import %s %s\n", importDllName, importName);
                         }
 
-                        *thunkData = (DWORD)cpu_get_virtual_address(cpu, (size_t)import);
+                        *thunkData = (DWORD)cpu_get_virtual_address(cpu, import);
                     }
                     
                     thunkData++;

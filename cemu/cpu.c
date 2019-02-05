@@ -29,7 +29,7 @@ void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, u
         return;
     }
     
-    cpu->VirtualMemoryStackAddress = cpu_get_virtual_address(cpu, (size_t)stackPtr);
+    cpu->VirtualMemoryStackAddress = cpu_get_virtual_address(cpu, stackPtr);
     cpu->VirtualMemoryStackEndAddress = cpu->VirtualMemoryStackAddress + cpu->VirtualMemoryStackSize;
     
     cpu->VirtualMemorySize = cpu->VirtualMemoryStackSize + cpu->VirtualMemoryHeapSize;
@@ -397,9 +397,9 @@ int32_t cpu_is_valid_address(CPU* cpu, uint32_t addr, int32_t size)
     return addr >= cpu->VirtualMemoryAddress && addr < cpu->VirtualMemoryEndAddress;
 }
 
-uint32_t cpu_get_virtual_address(CPU* cpu, size_t realAddress)
+uint32_t cpu_get_virtual_address(CPU* cpu, void* realAddress)
 {
-    return memmgr_get_virtual_address(&cpu->Memory, realAddress);
+    return memmgr_get_virtual_address(&cpu->Memory, (size_t)realAddress);
 }
 
 size_t cpu_get_real_address(CPU* cpu, uint32_t virtualAddress)
