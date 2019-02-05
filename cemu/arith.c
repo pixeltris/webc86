@@ -386,7 +386,7 @@ int32_t cpu_xor(CPU* cpu, int32_t dest_operand, int32_t source_operand, int32_t 
     return cpu->LastResult;
 }
 
-int8_t cpu_rol8(CPU* cpu, int16_t dest_operand, int32_t count)
+int8_t cpu_rol8(CPU* cpu, int8_t dest_operand, int32_t count)
 {
     if (count == 0)
     {
@@ -692,7 +692,7 @@ int8_t cpu_sar8(CPU* cpu, int8_t dest_operand, int32_t count)
     
     if (count < 8)
     {
-        cpu->LastResult = dest_operand << 24 >> count + 24;
+        cpu->LastResult = (dest_operand << 24) >> (count + 24);
         // of is zero
         cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (dest_operand >> (count - 1) & 1);
     }
@@ -708,7 +708,7 @@ int8_t cpu_sar8(CPU* cpu, int8_t dest_operand, int32_t count)
     return (int8_t)cpu->LastResult;
 }
 
-int16_t cpu_sar16(CPU* cpu, int16_t dest_operand, int16_t source_operand, int32_t count)
+int16_t cpu_sar16(CPU* cpu, int16_t dest_operand, int32_t count)
 {
     if (count == 0)
     {
@@ -717,7 +717,7 @@ int16_t cpu_sar16(CPU* cpu, int16_t dest_operand, int16_t source_operand, int32_
     
     if (count < 16)
     {
-        cpu->LastResult = dest_operand << 16 >> count + 16;
+        cpu->LastResult = (dest_operand << 16) >> (count + 16);
         cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (dest_operand >> (count - 1) & 1);
     }
     else
@@ -732,7 +732,7 @@ int16_t cpu_sar16(CPU* cpu, int16_t dest_operand, int16_t source_operand, int32_
     return (int16_t)cpu->LastResult;
 }
 
-int32_t cpu_sar32(CPU* cpu, int32_t dest_operand, int32_t source_operand, int32_t count)
+int32_t cpu_sar32(CPU* cpu, int32_t dest_operand, int32_t count)
 {
     if (count == 0)
     {

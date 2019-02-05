@@ -29,6 +29,9 @@ void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, u
         return;
     }
     
+    cpu->VirtualMemoryStackAddress = cpu_get_virtual_address(cpu, (size_t)stackPtr);
+    cpu->VirtualMemoryStackEndAddress = cpu->VirtualMemoryStackAddress + cpu->VirtualMemoryStackSize;
+    
     cpu->VirtualMemorySize = cpu->VirtualMemoryStackSize + cpu->VirtualMemoryHeapSize;
     if (cpu->VirtualMemorySize != cpu->Memory.PoolSizeInBytes)
     {
@@ -37,6 +40,7 @@ void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, u
     }
     
     cpu->EIP = cpu->VirtualEntryPointAddress;
+    cpu->Reg[REG_ESP] = cpu->VirtualMemoryStackEndAddress;
     
     cpu_allocate_data_imports(cpu);
 }
@@ -44,12 +48,6 @@ void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, u
 void cpu_destroy(CPU* cpu)
 {
     memmgr_destroy(&cpu->Memory);
-}
-
-int32_t cpu_setjmp(CPU* cpu)
-{
-    cpu->JmpBufInitialized = 1;
-    return setjmp(cpu->JmpBuf);
 }
 
 void cpu_onerror(CPU* cpu, char* error, ...)
@@ -120,12 +118,12 @@ void cpu_check_stack_memory(CPU* cpu)
     if (esp < cpu->VirtualMemoryStackAddress)
     {
         uint32_t overflowAmount = (uint32_t)(cpu->VirtualMemoryStackAddress - esp);
-        cpu_onerror(cpu, "Emulator encountered a stack overflow (%u byte(s))", overflowAmount);
+        cpu_onerror(cpu, "Emulator encountered a stack overflow (%u byte(s))\n", overflowAmount);
     }
     else if (esp >= cpu->VirtualMemoryStackEndAddress)
     {
         uint32_t underflowAmount = (uint32_t)(esp - cpu->VirtualMemoryStackEndAddress);
-        cpu_onerror(cpu, "Emulator encountered a stack underflow (%u byte(s))", underflowAmount);
+        cpu_onerror(cpu, "Emulator encountered a stack underflow (%u byte(s))\n", underflowAmount);
     }
 }
 
@@ -138,14 +136,16 @@ void cpu_exec_call(CPU* cpu, uint32_t addr)
             // Function import call
             ImportInfo* import = (ImportInfo*)cpu_get_real_address(cpu, addr);
             import->Callback(cpu);
+            return;
         }
         else
         {
             cpu_push32(cpu, cpu->EIP);
             cpu->EIP = addr;
+            return;
         }
     }
-    cpu_onerror(cpu, "exec_call invalid function address 0x%08X EIP: 0x%08X", addr, cpu->EIP);
+    cpu_onerror(cpu, "exec_call invalid function address 0x%08X EIP: 0x%08X\n", addr, cpu->EIP);
 }
 
 int32_t cpu_exec_check_jump_function(CPU* cpu, uint32_t addr)
@@ -167,7 +167,7 @@ int32_t cpu_exec_check_jump_function(CPU* cpu, uint32_t addr)
             return 0;
         }
     }
-    cpu_onerror(cpu, "cpu_exec_check_jump_function invalid function address 0x%08X EIP: 0x%08X", addr, cpu->EIP);
+    cpu_onerror(cpu, "cpu_exec_check_jump_function invalid function address 0x%08X EIP: 0x%08X\n", addr, cpu->EIP);
     return 0;
 }
 
@@ -336,7 +336,7 @@ void cpu_push16(CPU* cpu, uint16_t val)
 
 void cpu_push32(CPU* cpu, uint32_t val)
 {
-    uint32_t sp = cpu_get_esp(cpu, -2);
+    uint32_t sp = cpu_get_esp(cpu, -4);
     
     cpu_writeU32(cpu, sp, val);
     cpu_adjust_stack_reg(cpu, -4);

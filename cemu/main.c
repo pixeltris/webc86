@@ -515,8 +515,9 @@ int main()
         return 2;
     }
     
-    if (cpu_setjmp(&cpu) == 0 && cpu.ErrorCode == 0)
+    if (setjmp(cpu.JmpBuf) == 0 && cpu.ErrorCode == 0)
     {
+        cpu.JmpBufInitialized = 1;
         while (!cpu.Complete)
         {
             cpu_execute_instruction(&cpu);

@@ -282,7 +282,7 @@ void cpu_execute_instruction_t16(CPU* cpu)
     {
         case 0x01:
             cpu_fetch_modrm(cpu);
-            cpu_write_e16(cpu, cpu_add16(cpu_read_write_e16(cpu), cpu_read_g16(cpu)));
+            cpu_write_e16(cpu, cpu_add16(cpu, cpu_read_write_e16(cpu), cpu_read_g16(cpu)));
             break;
         case 0x09:
             cpu_fetch_modrm(cpu);
@@ -507,7 +507,7 @@ void cpu_execute_instruction_t16(CPU* cpu)
                     break;
                 case 1:
                     tempI16 = cpu_read_write_e16(cpu);
-                    cpu_write_e16(cpu, cpu_dec16(tempI16));
+                    cpu_write_e16(cpu, cpu_dec16(cpu, tempI16));
                     break;
                 case 2:
                     tempI16 = cpu_read_write_e16(cpu);
@@ -583,7 +583,7 @@ void cpu_execute_instruction_t32(CPU* cpu)
     {
         case 0x01:
             cpu_fetch_modrm(cpu);
-            cpu_write_e32(cpu, cpu_add32(cpu_read_write_e16(cpu), cpu_read_g32s(cpu)));
+            cpu_write_e32(cpu, cpu_add32(cpu, cpu_read_write_e16(cpu), cpu_read_g32s(cpu)));
             break;
         case 0x09:
             cpu_fetch_modrm(cpu);
@@ -815,7 +815,7 @@ void cpu_execute_instruction_t32(CPU* cpu)
                     break;
                 case 3:
                     tempI32 = cpu_read_write_e32(cpu);
-                    cpu_write_e32(cpu, cpu_neg32(tempI32));
+                    cpu_write_e32(cpu, cpu_neg32(cpu, tempI32));
                     break;
                 case 4:
                     tempI32 = cpu_read_e32(cpu);

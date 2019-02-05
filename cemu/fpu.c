@@ -329,11 +329,11 @@ int32_t fpu_op_D9_mem(CPU* cpu, uint8_t imm8, uint32_t addr)
             break;
         case 2:
             // fst
-            fpu_store_m32(cpu, addr, fpu_get_st0(cpu));
+            fpu_store_m32(cpu, addr, (float)fpu_get_st0(cpu));
             break;
         case 3:
             // fstp
-            fpu_store_m32(cpu, addr, fpu_get_st0(cpu));
+            fpu_store_m32(cpu, addr, (float)fpu_get_st0(cpu));
             fpu_pop(cpu);
             break;
         default:
@@ -395,30 +395,12 @@ int32_t fpu_op_DB_mem(CPU* cpu, uint8_t imm8, uint32_t addr)
         case 2:
             // fist
             st0 = fpu_integer_round(cpu, fpu_get_st0(cpu));
-            if (st0 <= 0x7FFFFFFF && st0 >= -0x80000000)
-            {
-                // TODO: Invalid operation
-                cpu_writeI32(cpu, addr, st0);
-            }
-            else
-            {
-                fpu_invalid_arithmatic(cpu);
-                cpu_writeU32(cpu, addr, 0x80000000);
-            }
+            cpu_writeI32(cpu, addr, st0);
             break;
         case 3:
             // fistp
             st0 = fpu_integer_round(cpu, fpu_get_st0(cpu));
-            if (st0 <= 0x7FFFFFFF && st0 >= -0x80000000)
-            {
-                // TODO: Invalid operation
-                cpu_writeI32(cpu, addr, st0);
-            }
-            else
-            {
-                fpu_invalid_arithmatic(cpu);
-                cpu_writeU32(cpu, addr, 0x80000000);
-            }
+            cpu_writeI32(cpu, addr, st0);
             break;
         case 5:
             // fld
@@ -579,7 +561,7 @@ int32_t fpu_op_DD_mem(CPU* cpu, uint8_t imm8, uint32_t addr)
         case 0:
             // fld
             m64 = fpu_load_m64(cpu, addr);
-            fpu_push(cpu, m64);
+            fpu_push(cpu, (long double)m64);
             break;
         case 2:
             // fst
@@ -778,7 +760,7 @@ int32_t fpu_op_DF_mem(CPU* cpu, uint8_t imm8, uint32_t addr)
         case 5:
             // fild
             m64 = cpu_readU64(cpu, addr);
-            fpu_push(cpu, m64);
+            fpu_push(cpu, (long double)m64);
             break;
         default:
             return 0;
