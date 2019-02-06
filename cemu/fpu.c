@@ -41,7 +41,7 @@ void fpu_invalid_arithmatic(CPU* cpu)
     cpu->Fpu.StatusWord |= FPU_EX_I;
 }
 
-int32_t fpu_integer_round(CPU* cpu, long double f)
+int64_t fpu_integer_round(CPU* cpu, long double f)
 {
     int32_t rc = cpu->Fpu.ControlWord >> 10 & 3;
     return cpu_integer_round(cpu, f, rc);
@@ -384,6 +384,7 @@ int32_t fpu_op_DB_mem(CPU* cpu, uint8_t imm8, uint32_t addr)
 {
     int32_t mod = imm8 >> 3 & 7;
     int32_t int32, st0;
+    int64_t st0l;
     
     switch (mod)
     {
@@ -394,13 +395,31 @@ int32_t fpu_op_DB_mem(CPU* cpu, uint8_t imm8, uint32_t addr)
             break;
         case 2:
             // fist
-            st0 = fpu_integer_round(cpu, fpu_get_st0(cpu));
-            cpu_writeI32(cpu, addr, st0);
+            st0l = fpu_integer_round(cpu, fpu_get_st0(cpu));
+            if (st0l <= INT32_MAX && st0l >= INT32_MIN)
+            {
+                // TODO: Invalid operation
+                cpu_writeI32(cpu, addr, (int32_t)st0l);
+            }
+            else
+            {
+                fpu_invalid_arithmatic(cpu);
+                cpu_writeU32(cpu, addr, 0x80000000);
+            }
             break;
         case 3:
             // fistp
-            st0 = fpu_integer_round(cpu, fpu_get_st0(cpu));
-            cpu_writeI32(cpu, addr, st0);
+            st0l = fpu_integer_round(cpu, fpu_get_st0(cpu));
+            if (st0l <= INT32_MAX && st0l >= INT32_MIN)
+            {
+                // TODO: Invalid operation
+                cpu_writeI32(cpu, addr, st0l);
+            }
+            else
+            {
+                fpu_invalid_arithmatic(cpu);
+                cpu_writeU32(cpu, addr, 0x80000000);
+            }
             break;
         case 5:
             // fld
@@ -732,8 +751,8 @@ int32_t fpu_op_DF_mem(CPU* cpu, uint8_t imm8, uint32_t addr)
             break;
         case 2:
             // fist
-            st0 = fpu_integer_round(cpu, fpu_get_st0(cpu));
-            if (st0 <= 0x7FFF && st0 >= -0x8000)
+            st0 = (int32_t)fpu_integer_round(cpu, fpu_get_st0(cpu));
+            if (st0 <= INT16_MAX && st0 >= INT16_MIN)
             {
                 cpu_writeU32(cpu, addr, (uint32_t)st0);
             }
@@ -745,8 +764,8 @@ int32_t fpu_op_DF_mem(CPU* cpu, uint8_t imm8, uint32_t addr)
             break;
         case 3:
             // fistp
-            st0 = fpu_integer_round(cpu, fpu_get_st0(cpu));
-            if (st0 <= 0x7FFF && st0 >= -0x8000)
+            st0 = (int32_t)fpu_integer_round(cpu, fpu_get_st0(cpu));
+            if (st0 <= INT16_MAX && st0 >= INT16_MIN)
             {
                 cpu_writeU32(cpu, addr, (uint32_t)st0);
             }

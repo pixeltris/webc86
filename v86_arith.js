@@ -206,7 +206,7 @@ CPU.prototype.mul16 = function(source_operand)
     //console.log(h(a) + " * " + h(this.reg16[reg_ax]) + " = " + h(result));
 
     this.setReg16(reg_eax, result);//this.reg16[reg_ax] = result;
-    this.setReg16(reg_edx, result);//this.reg16[reg_dx] = high_result;
+    this.setReg16(reg_edx, high_result);//this.reg16[reg_dx] = high_result;
 
     this.last_result = result & 0xFFFF;
     this.last_op_size = OPSIZE_16;
@@ -231,7 +231,7 @@ CPU.prototype.imul16 = function(source_operand)
     var result = source_operand * this.getReg16s(reg_eax);//this.reg16s[reg_ax];
 
     this.setReg16(reg_eax, result);//this.reg16[reg_ax] = result;
-    this.setReg16(reg_eax, result >> 16);//this.reg16[reg_dx] = result >> 16;
+    this.setReg16(reg_edx, result >> 16);//this.reg16[reg_dx] = result >> 16;
 
     this.last_result = result & 0xFFFF;
     this.last_op_size = OPSIZE_16;
@@ -455,7 +455,7 @@ CPU.prototype.div16 = function(source_operand)
     }
 
     var
-        target_operand = (this.getReg16[reg_eax] | this.getReg16[reg_edx] << 16) >>> 0,//(this.reg16[reg_ax] | this.reg16[reg_dx] << 16) >>> 0,
+        target_operand = (this.getReg16(reg_eax) | this.getReg16(reg_edx) << 16) >>> 0,//(this.reg16[reg_ax] | this.reg16[reg_dx] << 16) >>> 0,
         result = target_operand / source_operand | 0;
 
     if(result >= 0x10000 || result < 0)

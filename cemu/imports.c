@@ -16,6 +16,32 @@ void import_exit(CPU* cpu)
     cpu->Complete = 1;
 }
 
+void import_wc86_assert(CPU* cpu)
+{
+    char* test = (char*)cpu_get_real_address(cpu, cpu_readU32(cpu, cpu_get_esp(cpu, 0)));
+    int32_t passed = cpu_readI32(cpu, cpu_get_esp(cpu, 4)) != 0;
+    
+    printf("pass:%d ESP:0x%08X test:%s\n", passed, cpu->Reg[REG_ESP], test);
+}
+
+void import_wc86_assertI32(CPU* cpu)
+{
+    char* test = (char*)cpu_get_real_address(cpu, cpu_readU32(cpu, cpu_get_esp(cpu, 0)));
+    int32_t val = cpu_readI32(cpu, cpu_get_esp(cpu, 4));
+    int32_t expected = cpu_readI32(cpu, cpu_get_esp(cpu, 8));
+    
+    printf("pass:%d ESP:0x%08X val:%d expected:%d test:%s\n", (val == expected), cpu->Reg[REG_ESP], val, expected, test);
+}
+
+void import_wc86_assertU32(CPU* cpu)
+{
+    char* test = (char*)cpu_get_real_address(cpu, cpu_readU32(cpu, cpu_get_esp(cpu, 0)));
+    uint32_t val = cpu_readU32(cpu, cpu_get_esp(cpu, 4));
+    uint32_t expected = cpu_readU32(cpu, cpu_get_esp(cpu, 8));
+    
+    printf("pass:%d ESP:0x%08X val:%u expected:%u test:%s\n", (val == expected), cpu->Reg[REG_ESP], val, expected, test);
+}
+
 void import_getmainargs(CPU* cpu)
 {
     uint32_t argcAddr = cpu_readU32(cpu, cpu_get_esp(cpu, 0));
@@ -85,6 +111,10 @@ void cpu_init_common_imports(CPU* cpu, int32_t* counter)
     cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "__argv", 4);
     cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "_environ", 4);
     cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "_iob", 32 * 20);// 20 FILE entries
+    
+    cpu_define_import(cpu, counter, NULL, "webc86.dll", "wc86_assert", import_wc86_assert);
+    cpu_define_import(cpu, counter, NULL, "webc86.dll", "wc86_assertI32", import_wc86_assertI32);
+    cpu_define_import(cpu, counter, NULL, "webc86.dll", "wc86_assertU32", import_wc86_assertU32);
 }
 
 void cpu_init_imports(CPU* cpu)

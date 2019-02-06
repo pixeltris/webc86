@@ -209,88 +209,299 @@ int32_t cpu_neg(CPU* cpu, int32_t dest_operand, int32_t op_size)
     return cpu->LastResult;
 }
 
-uint8_t cpu_mul8(CPU* cpu, uint8_t source_operand)
+void cpu_mul8(CPU* cpu, uint8_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_mul8\n");
-    return 0;
+    int32_t result = source_operand * cpu_getReg8(cpu, REG_EAX);
+    
+    cpu_setReg16(cpu, REG_EAX, result);
+    cpu->LastResult = result & 0xFF;
+    cpu->LastOpSize = OPSIZE_8;
+    
+    if (result < 0x100)
+    {
+        cpu->Flags = cpu->Flags & ~1 & ~FLAG_OVERFLOW;
+    }
+    else
+    {
+        cpu->Flags = cpu->Flags | 1 | FLAG_OVERFLOW;
+    }
+    
+    cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
 }
 
-int8_t cpu_imul8(CPU* cpu, int8_t source_operand)
+void cpu_imul8(CPU* cpu, int8_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_imul8\n");
-    return 0;
+    int32_t result = source_operand * cpu_getReg8s(cpu, REG_EAX);
+    
+    cpu_setReg16(cpu, REG_EAX, result);
+    cpu->LastResult = result & 0xFF;
+    cpu->LastOpSize = OPSIZE_8;
+    
+    if (result > INT8_MAX || result < INT8_MIN)
+    {
+        cpu->Flags = cpu->Flags | 1 | FLAG_OVERFLOW;
+    }
+    else
+    {
+        cpu->Flags = cpu->Flags & ~1 & ~FLAG_OVERFLOW;
+    }
+    cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
 }
 
-uint16_t cpu_mul16(CPU* cpu, uint16_t source_operand)
+void cpu_mul16(CPU* cpu, uint16_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_mul16\n");
-    return 0;
+    int32_t result = source_operand * cpu_getReg16(cpu, REG_EAX);
+    int32_t high_result = result >> 16;
+    
+    cpu_setReg16(cpu, REG_EAX, result);
+    cpu_setReg16(cpu, REG_EDX, high_result);
+    
+    cpu->LastResult = result & 0xFFFF;
+    cpu->LastOpSize = OPSIZE_16;
+    
+    if (high_result == 0)
+    {
+        cpu->Flags &= ~1 & ~FLAG_OVERFLOW;
+    }
+    else
+    {
+        cpu->Flags |= 1 | FLAG_OVERFLOW;
+    }
+    cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
 }
 
-int16_t cpu_imul16(CPU* cpu, int16_t source_operand)
+void cpu_imul16(CPU* cpu, int16_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_imul16\n");
-    return 0;
+    int32_t result = source_operand * cpu_getReg16s(cpu, REG_EAX);
+    
+    cpu_setReg16(cpu, REG_EAX, result);
+    cpu_setReg16(cpu, REG_EDX, result >> 16);
+    
+    cpu->LastResult = result & 0xFFFF;
+    cpu->LastOpSize = OPSIZE_16;
+    
+    if (result > INT16_MAX || result < INT16_MIN)
+    {
+        cpu->Flags &= ~1 & ~FLAG_OVERFLOW;
+    }
+    else
+    {
+        cpu->Flags |= 1 | FLAG_OVERFLOW;
+    }
+    cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
 }
 
 int16_t cpu_imul_reg16(CPU* cpu, int16_t operand1, int16_t operand2)
 {
-    cpu_onerror(cpu, "TODO: cpu_imul_reg16\n");
-    return 0;
+    int32_t result = operand1 * operand2;
+    
+    cpu->LastResult = result & 0xFFFF;
+    cpu->LastOpSize = OPSIZE_16;
+    
+    if (result > INT16_MAX || result < INT16_MIN)
+    {
+        cpu->Flags |= 1 | FLAG_OVERFLOW;
+    }
+    else
+    {
+        cpu->Flags &= ~1 & ~FLAG_OVERFLOW;
+    }
+    cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
+    
+    return result;
 }
 
-uint32_t cpu_mul32(CPU* cpu, uint32_t source_operand)
+void cpu_mul32(CPU* cpu, uint32_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_mul32\n");
-    return 0;
+    int64_t result = (int64_t)source_operand * (int64_t)cpu_getReg32s(cpu, REG_EAX);
+    int32_t high_result = (int32_t)(result >> 32);
+    
+    cpu_setReg32s(cpu, REG_EAX, (int32_t)result);
+    cpu_setReg32s(cpu, REG_EDX, high_result);
+    
+    cpu->LastResult = result & 0xFFFFFFFF;
+    cpu->LastOpSize = OPSIZE_32;
+    
+    if (high_result == 0)
+    {
+        cpu->Flags &= ~1 & ~FLAG_OVERFLOW;
+    }
+    else
+    {
+        cpu->Flags |= 1 | FLAG_OVERFLOW;
+    }
+    cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
 }
 
-int32_t cpu_imul32(CPU* cpu, int32_t source_operand)
+void cpu_imul32(CPU* cpu, int32_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_imul32\n");
-    return 0;
+    int64_t result = (int64_t)source_operand * (int64_t)cpu_getReg32s(cpu, REG_EAX);
+    
+    cpu_setReg32s(cpu, REG_EAX, (int32_t)result);
+    cpu_setReg32s(cpu, REG_EDX, (int32_t)(result >> 32));
+    
+    cpu->LastResult = result & 0xFFFFFFFF;
+    cpu->LastOpSize = OPSIZE_32;
+    
+    if (result > INT32_MAX || result < INT32_MIN)
+    {
+        cpu->Flags &= ~1 & ~FLAG_OVERFLOW;
+    }
+    else
+    {
+        cpu->Flags |= 1 | FLAG_OVERFLOW;
+    }
+    cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
 }
 
 int32_t cpu_imul_reg32(CPU* cpu, int32_t operand1, int32_t operand2)
 {
-    cpu_onerror(cpu, "TODO: cpu_imul_reg32\n");
-    return 0;
+    int64_t result = (int64_t)operand1 * (int64_t)operand2;
+    
+    cpu->LastResult = result & 0xFFFFFFFF;
+    cpu->LastOpSize = OPSIZE_32;
+    
+    if (result > INT32_MAX || result < INT32_MIN)
+    {
+        cpu->Flags |= 1 | FLAG_OVERFLOW;
+    }
+    else
+    {
+        cpu->Flags &= ~1 & ~FLAG_OVERFLOW;
+    }
+    cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
+    
+    return (int32_t)result;
 }
 
-uint8_t cpu_div8(CPU* cpu, uint8_t source_operand)
+void cpu_div8(CPU* cpu, uint8_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_div8\n");
-    return 0;
+    if (source_operand == 0)
+    {
+        cpu_trigger_de(cpu);
+        return;
+    }
+    
+    uint32_t target_operand = cpu_getReg16(cpu, REG_EAX);
+    uint32_t result = target_operand / source_operand;
+    
+    if (result > UINT8_MAX)
+    {
+        cpu_trigger_de(cpu);
+    }
+    else
+    {
+        cpu_setReg16(cpu, REG_EAX, result | ((target_operand % source_operand) << 8));
+    }
 }
 
-int8_t cpu_idiv8(CPU* cpu, int8_t source_operand)
+void cpu_idiv8(CPU* cpu, int8_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_idiv8\n");
-    return 0;
+    if (source_operand == 0)
+    {
+        cpu_trigger_de(cpu);
+        return;
+    }
+    
+    int32_t target_operand = cpu_getReg16s(cpu, REG_EAX);
+    int32_t result = target_operand / source_operand;
+    
+    if (result > INT16_MAX || result < INT16_MIN)
+    {
+        cpu_trigger_de(cpu);
+    }
+    else
+    {
+        cpu_setReg16(cpu, REG_EAX, result | ((target_operand % source_operand) << 8));
+    }
 }
 
-uint16_t cpu_div16(CPU* cpu, uint16_t source_operand)
+void cpu_div16(CPU* cpu, uint16_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_div16\n");
-    return 0;
+    if (source_operand == 0)
+    {
+        cpu_trigger_de(cpu);
+        return;
+    }
+    
+    uint32_t target_operand = (cpu_getReg16(cpu, REG_EAX) | cpu_getReg16(cpu, REG_EDX) << 16);
+    uint32_t result = target_operand / source_operand;
+    
+    if (result > UINT16_MAX || result < 0)
+    {
+        cpu_trigger_de(cpu);
+    }
+    else
+    {
+        cpu_setReg16(cpu, REG_EAX, result);
+        cpu_setReg16(cpu, REG_EDX, target_operand % source_operand);
+    }
 }
 
-int16_t cpu_idiv16(CPU* cpu, int16_t source_operand)
+void cpu_idiv16(CPU* cpu, int16_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_idiv16\n");
-    return 0;
+    if (source_operand == 0)
+    {
+        cpu_trigger_de(cpu);
+        return;
+    }
+    
+    int32_t target_operand = cpu_getReg16(cpu, REG_EAX) | (cpu_getReg16(cpu, REG_EDX) << 16);
+    int32_t result = target_operand / source_operand;
+    
+    if(result > INT16_MAX || result < INT16_MIN)
+    {
+        cpu_trigger_de(cpu);
+    }
+    else
+    {
+        cpu_setReg16(cpu, REG_EAX, result);
+        cpu_setReg16(cpu, REG_EDX, target_operand % source_operand);
+    }
 }
 
-uint32_t cpu_div32(CPU* cpu, uint32_t source_operand)
+void cpu_div32(CPU* cpu, uint32_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_div32\n");
-    return 0;
+    if (source_operand == 0)
+    {
+        cpu_trigger_de(cpu);
+        return;
+    }
+    
+    uint64_t target_operand = ((uint64_t)cpu_getReg32(cpu, REG_EAX) | (uint64_t)cpu_getReg32(cpu, REG_EDX) << 32);
+    uint64_t result = target_operand / source_operand;
+    
+    if (result > UINT32_MAX || result < 0)
+    {
+        cpu_trigger_de(cpu);
+    }
+    else
+    {
+        cpu_setReg32(cpu, REG_EAX, result);
+        cpu_setReg32(cpu, REG_EDX, target_operand % source_operand);
+    }
 }
 
-int32_t cpu_idiv32(CPU* cpu, int32_t source_operand)
+void cpu_idiv32(CPU* cpu, int32_t source_operand)
 {
-    cpu_onerror(cpu, "TODO: cpu_idiv32\n");
-    return 0;
+    if (source_operand == 0)
+    {
+        cpu_trigger_de(cpu);
+        return;
+    }
+    
+    int64_t target_operand = (int64_t)cpu_getReg32(cpu, REG_EAX) | ((int64_t)cpu_getReg32(cpu, REG_EDX) << 32);
+    int64_t result = target_operand / source_operand;
+    
+    if(result > INT32_MAX || result < INT32_MIN)
+    {
+        cpu_trigger_de(cpu);
+    }
+    else
+    {
+        cpu_setReg32(cpu, REG_EAX, result);
+        cpu_setReg32(cpu, REG_EDX, target_operand % source_operand);
+    }
 }
 
 int8_t cpu_and8(CPU* cpu, int8_t dest, int8_t src)
@@ -394,12 +605,12 @@ int8_t cpu_rol8(CPU* cpu, int8_t dest_operand, int32_t count)
     }
     count &= 7;
     
-    int8_t result = (int8_t)(dest_operand << count | dest_operand >> (8 - count));
+    int32_t result = dest_operand << count | dest_operand >> (8 - count);
     
     cpu->FlagsChanged &= ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (result & 1) | (result << 11 ^ result << 4) & FLAG_OVERFLOW;
     
-    return result;
+    return (int8_t)result;
 }
 
 int16_t cpu_rol16(CPU* cpu, int16_t dest_operand, int32_t count)
@@ -410,12 +621,12 @@ int16_t cpu_rol16(CPU* cpu, int16_t dest_operand, int32_t count)
     }
     count &= 15;
     
-    int16_t result = (int16_t)(dest_operand << count | dest_operand >> (16 - count));
+    int32_t result = dest_operand << count | dest_operand >> (16 - count);
     
     cpu->FlagsChanged &= ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (result & 1) | (result << 11 ^ result >> 4) & FLAG_OVERFLOW;
     
-    return result;
+    return (int16_t)result;
 }
 
 int32_t cpu_rol32(CPU* cpu, int32_t dest_operand, int32_t count)
@@ -441,12 +652,12 @@ int8_t cpu_rcl8(CPU* cpu, int8_t dest_operand, int32_t count)
         return dest_operand;
     }
     
-    int8_t result = (int8_t)(dest_operand << count | cpu_getcf(cpu) << (count - 1) | dest_operand >> (9 - count));
+    int32_t result = dest_operand << count | cpu_getcf(cpu) << (count - 1) | dest_operand >> (9 - count);
     
     cpu->FlagsChanged &= ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (result >> 8 & 1) | (result << 3 ^ result << 4) & FLAG_OVERFLOW;
     
-    return result;
+    return (int8_t)result;
 }
 
 int16_t cpu_rcl16(CPU* cpu, int16_t dest_operand, int32_t count)
@@ -457,12 +668,12 @@ int16_t cpu_rcl16(CPU* cpu, int16_t dest_operand, int32_t count)
         return dest_operand;
     }
     
-    int16_t result = (int16_t)(dest_operand << count | cpu_getcf(cpu) << (count - 1) | dest_operand >> (17 - count));
+    int32_t result = dest_operand << count | cpu_getcf(cpu) << (count - 1) | dest_operand >> (17 - count);
     
     cpu->FlagsChanged &= ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (result >> 16 & 1) | (result >> 5 ^ result >> 4) & FLAG_OVERFLOW;
     
-    return result;
+    return (int16_t)result;
 }
 
 int32_t cpu_rcl32(CPU* cpu, int32_t dest_operand, int32_t count)
@@ -494,12 +705,12 @@ int8_t cpu_ror8(CPU* cpu, int8_t dest_operand, int32_t count)
     }
     
     count &= 7;
-    int8_t result = (int8_t)(dest_operand >> count | dest_operand << (8 - count));
+    int32_t result = dest_operand >> count | dest_operand << (8 - count);
     
     cpu->FlagsChanged &= ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (result >> 7 & 1) | (result << 4 ^ result << 5) & FLAG_OVERFLOW;
     
-    return result;
+    return (int8_t)result;
 }
 
 int16_t cpu_ror16(CPU* cpu, int16_t dest_operand, int32_t count)
@@ -510,12 +721,12 @@ int16_t cpu_ror16(CPU* cpu, int16_t dest_operand, int32_t count)
     }
     
     count &= 15;
-    int16_t result = (int16_t)(dest_operand >> count | dest_operand << (16 - count));
+    int32_t result = dest_operand >> count | dest_operand << (16 - count);
     
     cpu->FlagsChanged &= ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (result >> 15 & 1) | (result >> 4 ^ result >> 3) & FLAG_OVERFLOW;
     
-    return result;
+    return (int16_t)result;
 }
 
 int32_t cpu_ror32(CPU* cpu, int32_t dest_operand, int32_t count)
@@ -541,12 +752,12 @@ int8_t cpu_rcr8(CPU* cpu, int8_t dest_operand, int32_t count)
         return dest_operand;
     }
     
-    int8_t result = (int8_t)(dest_operand >> count | cpu_getcf(cpu) << (8 - count) | dest_operand << (9 - count));
+    int32_t result = dest_operand >> count | cpu_getcf(cpu) << (8 - count) | dest_operand << (9 - count);
     
     cpu->FlagsChanged &= ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (result >> 8 & 1) | (result << 4 ^ result << 5) & FLAG_OVERFLOW;
     
-    return result;
+    return (int8_t)result;
 }
 
 int16_t cpu_rcr16(CPU* cpu, int16_t dest_operand, int32_t count)
@@ -557,12 +768,12 @@ int16_t cpu_rcr16(CPU* cpu, int16_t dest_operand, int32_t count)
         return dest_operand;
     }
     
-    int16_t result = (int16_t)(dest_operand >> count | cpu_getcf(cpu) << (16 - count) | dest_operand << (17 - count));
+    int32_t result = dest_operand >> count | cpu_getcf(cpu) << (16 - count) | dest_operand << (17 - count);
     
     cpu->FlagsChanged &= ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (result >> 16 & 1) | (result >> 4 ^ result >> 3) & FLAG_OVERFLOW;
     
-    return result;
+    return (int16_t)result;
 }
 
 int32_t cpu_rcr32(CPU* cpu, int32_t dest_operand, int32_t count)
@@ -585,7 +796,7 @@ int32_t cpu_rcr32(CPU* cpu, int32_t dest_operand, int32_t count)
     return result;
 }
 
-int8_t cpu_shl8(CPU* cpu, int8_t dest_operand, int32_t count)
+uint8_t cpu_shl8(CPU* cpu, uint8_t dest_operand, int32_t count)
 {
     if (count == 0)
     {
@@ -598,10 +809,10 @@ int8_t cpu_shl8(CPU* cpu, int8_t dest_operand, int32_t count)
     cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (cpu->LastResult >> 8 & 1) | (cpu->LastResult << 3 ^ cpu->LastResult << 4) & FLAG_OVERFLOW;
     
-    return (int8_t)cpu->LastResult;
+    return (uint8_t)cpu->LastResult;
 }
 
-int16_t cpu_shl16(CPU* cpu, int16_t dest_operand, int32_t count)
+uint16_t cpu_shl16(CPU* cpu, uint16_t dest_operand, int32_t count)
 {
     if (count == 0)
     {
@@ -614,10 +825,10 @@ int16_t cpu_shl16(CPU* cpu, int16_t dest_operand, int32_t count)
     cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (cpu->LastResult >> 16 & 1) | (cpu->LastResult >> 5 ^ cpu->LastResult >> 4) & FLAG_OVERFLOW;
     
-    return (int16_t)cpu->LastResult;
+    return (uint16_t)cpu->LastResult;
 }
 
-int32_t cpu_shl32(CPU* cpu, int32_t dest_operand, int32_t count)
+uint32_t cpu_shl32(CPU* cpu, uint32_t dest_operand, int32_t count)
 {
     if (count == 0)
     {
@@ -635,7 +846,7 @@ int32_t cpu_shl32(CPU* cpu, int32_t dest_operand, int32_t count)
     return cpu->LastResult;
 }
 
-int8_t cpu_shr8(CPU* cpu, int8_t dest_operand, int32_t count)
+uint8_t cpu_shr8(CPU* cpu, uint8_t dest_operand, int32_t count)
 {
     if (count == 0)
     {
@@ -648,10 +859,10 @@ int8_t cpu_shr8(CPU* cpu, int8_t dest_operand, int32_t count)
     cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (dest_operand >> (count - 1) & 1) | (dest_operand >> 7 & 1) << 11 & FLAG_OVERFLOW;
     
-    return (int8_t)cpu->LastResult;
+    return (uint8_t)cpu->LastResult;
 }
 
-int16_t cpu_shr16(CPU* cpu, int16_t dest_operand, int32_t count)
+uint16_t cpu_shr16(CPU* cpu, uint16_t dest_operand, int32_t count)
 {
     if (count == 0)
     {
@@ -664,10 +875,10 @@ int16_t cpu_shr16(CPU* cpu, int16_t dest_operand, int32_t count)
     cpu->FlagsChanged = FLAGS_ALL & ~1 & ~FLAG_OVERFLOW;
     cpu->Flags = (cpu->Flags & ~1 & ~FLAG_OVERFLOW) | (dest_operand >> (count - 1) & 1) | (dest_operand >> 4) & FLAG_OVERFLOW;
     
-    return (int16_t)cpu->LastResult;
+    return (uint16_t)cpu->LastResult;
 }
 
-int32_t cpu_shr32(CPU* cpu, int32_t dest_operand, int32_t count)
+uint32_t cpu_shr32(CPU* cpu, uint32_t dest_operand, int32_t count)
 {
     if (count == 0)
     {
@@ -790,7 +1001,7 @@ int32_t cpu_shrd32(CPU* cpu, int32_t dest_operand, int32_t source_operand, int32
     return cpu->LastResult;
 }
 
-int16_t cpu_shld16(CPU* cpu, int32_t dest_operand, int16_t source_operand, int32_t count)
+int16_t cpu_shld16(CPU* cpu, int16_t dest_operand, int16_t source_operand, int32_t count)
 {
     if (count == 0)
     {
@@ -840,11 +1051,11 @@ int32_t cpu_shld32(CPU* cpu, int32_t dest_operand, int32_t source_operand, int32
     return cpu->LastResult;
 }
 
-int32_t cpu_integer_round(CPU* cpu, long double f, int32_t rc)
+int64_t cpu_integer_round(CPU* cpu, long double f, int32_t rc)
 {
     if (rc == 0)
     {
-        return (int32_t)roundl(f);
+        return llroundl(f);
     }
     else if (rc == 1 || (rc == 3 && f > 0))
     {
@@ -852,7 +1063,7 @@ int32_t cpu_integer_round(CPU* cpu, long double f, int32_t rc)
     }
     else
     {
-        return (int32_t)ceill(f);
+        return (int64_t)ceill(f);
     }
 }
 
