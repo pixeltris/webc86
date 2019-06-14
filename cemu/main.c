@@ -56,8 +56,8 @@ int try_get_file_size(FILE* file, size_t* outFileSize)
 typedef struct
 {
     int ErrorCode;
-    size_t Address;// The address of the exe
-    size_t AddressOfEntryPoint;// The address of the first instruction to execute (only used for reference, use the virtual address)
+    size_t Address;// The address of the exe (real address)
+    size_t AddressOfEntryPoint;// The address of the first instruction to execute (real address, only used for reference, use the virtual address)
     DWORD VirtualAddress;// The virtual address of the loaded exe (should be ntHeader.OptionalHeader.ImageBase)
     DWORD VirtualAddressOfEntryPoint;// Virtual address of the first instruction to execute
     DWORD ImageSize;// ntHeader.OptionalHeader.SizeOfImage
@@ -76,35 +76,56 @@ ExeLoadResult* close_win32_exe(ExeLoadResult* result, FILE* file, int errorCode)
     return result;
 }
 
-ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targetName, const char* fileName)
+ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const char* fileName, ModuleInfo* moduleInfo);
+ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* fileName, ModuleInfo* moduleInfo)
+{
+    load_win32_exe_internal(cpu, result, fileName, moduleInfo);
+    if (result->ErrorCode == 0)
+    {
+        moduleInfo->IsLoaded = 1;
+    }
+    return result;
+}
+
+ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const char* fileName, ModuleInfo* moduleInfo)
 {
     // TODO: Check our logic is correct of validation of virtual addresses / sizes before accessing memory at those addresses.
     //       Also seperate out the validation logic to another function to make things a little clearer?
 
     // Error codes (LPE = load portable executable)
-    const int LPE_LOAD_FILE_FAILED = 1;
-    const int LPE_READ_IMAGE_DOS_HEADER_FAILED = 2;
-    const int LPE_UNSUPPORTED_IMAGE_DOS_HEADER_SIGNATURE = 3;
-    const int LPE_BAD_LFA_NEW_OFFSET = 4;
-    const int LPE_READ_IMAGE_NT_HEADER_FAILED = 5;
-    const int LPE_UNSUPPORTED_IMAGE_NT_HEADER_SIGNATURE = 6;
-    const int LPE_UNSUPPORTED_ARCHITECTURE = 7;
-    const int LPE_READ_IMAGE_OPTIONAL_HEADER_FAILED = 8;
-    const int LPE_BAD_NUMBER_OF_IMAGE_SECTION_HEADER = 9;
-    const int LPE_READ_IMAGE_SECTION_HEADER_FAILED = 10;
-    const int LPE_BAD_IMAGE_SECTION_HEADER_DATA_RANGE = 11;
-    const int LPE_BAD_IMAGE_SECTION_HEADER_VIRTUAL_ADDRESS = 12;
-    const int LPE_BAD_IMAGE_DATA_DIRECTORY_VIRTUAL_ADDRESS = 13;
-    const int LPE_GET_FILE_SIZE_FAILED = 14;
-    const int LPE_BASE_VIRTUAL_ADDRESS_ALREADY_ASSIGNED = 15;
-    const int LPE_ALLOCATE_VIRTUAL_MEMORY_FAILED = 16;
-    const int LPE_INVALID_VIRTUAL_MEMORY = 17;
-    const int LPE_SEEK_FILE_START_FAILED = 18;
-    const int LPE_COPY_PE_HEADER_FAILED = 19;
-    const int LPE_READ_IMAGE_SECTION_HEADER_DATA_FAILED = 20;
-    const int LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_NAME = 21;
-    const int LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_VIRTUAL_ADDRESS = 22;
-    const int LPE_BAD_IMAGE_IMPORT_BY_NAME = 23;
+    enum
+    {
+        LPE_LOAD_FILE_FAILED,
+        LPE_READ_IMAGE_DOS_HEADER_FAILED,
+        LPE_UNSUPPORTED_IMAGE_DOS_HEADER_SIGNATURE,
+        LPE_BAD_LFA_NEW_OFFSET,
+        LPE_READ_IMAGE_NT_HEADER_FAILED,
+        LPE_UNSUPPORTED_IMAGE_NT_HEADER_SIGNATURE,
+        LPE_UNSUPPORTED_ARCHITECTURE,
+        LPE_READ_IMAGE_OPTIONAL_HEADER_FAILED,
+        LPE_BAD_NUMBER_OF_IMAGE_SECTION_HEADER,
+        LPE_READ_IMAGE_SECTION_HEADER_FAILED,
+        LPE_BAD_IMAGE_SECTION_HEADER_DATA_RANGE,
+        LPE_BAD_IMAGE_SECTION_HEADER_VIRTUAL_ADDRESS,
+        LPE_BAD_IMAGE_DATA_DIRECTORY_VIRTUAL_ADDRESS,
+        LPE_GET_FILE_SIZE_FAILED,
+        LPE_BASE_VIRTUAL_ADDRESS_ALREADY_ASSIGNED,
+        LPE_ALIGN_MODULE_FAILED,
+        LPE_ALLOCATE_VIRTUAL_MEMORY_FAILED,
+        LPE_INVALID_VIRTUAL_MEMORY,
+        LPE_SEEK_FILE_START_FAILED,
+        LPE_COPY_PE_HEADER_FAILED,
+        LPE_READ_IMAGE_SECTION_HEADER_DATA_FAILED,
+        LPE_BAD_IMAGE_EXPORT_DIRECTORY_DLL_NAME,
+        LPE_BAD_IMAGE_EXPORT_DIRECTORY_NAME,
+        LPE_BAD_IMAGE_EXPORT_DIRECTORY_ORDINAL,
+        LPE_BAD_IMAGE_EXPORT_DIRECTORY_ADDRESS,
+        LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_NAME,
+        LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_VIRTUAL_ADDRESS,
+        LPE_BAD_IMAGE_IMPORT_BY_NAME
+    };
+    
+    int32_t isMainModule = moduleInfo == &cpu->MainModule;
 
     memset(result, 0, sizeof(ExeLoadResult));
 
@@ -199,10 +220,9 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
         }
 
         // Ensure the virtual address doesn't point outside of OptionalHeader.SizeOfImage (as we depend on this in a memcpy below)
-        // NOTE: Is this even correct? Couldn't we have crazy virtual addresses. Maybe change virtualProcessMemory to be initialized
+        // NOTE: Is this even correct? Couldn't we have crazy virtual addresses. Maybe change moduleMemory to be initialized
         //      to the largest section->VirtualAddress + section->SizeOfRawData.
-        if (section->SizeOfRawData < 0 || section->VirtualAddress < 0 || 
-            section->VirtualAddress + section->SizeOfRawData > ntHeader.OptionalHeader.SizeOfImage)
+        if (section->VirtualAddress + section->SizeOfRawData > ntHeader.OptionalHeader.SizeOfImage)
         {
             LPE_LOG("IMAGE_SECTION_HEADER has a bad VirtualAddress pointing outside of OptionalHeader.SizeOfImage\n");
             return close_win32_exe(result, file, LPE_BAD_IMAGE_SECTION_HEADER_VIRTUAL_ADDRESS);
@@ -227,8 +247,7 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
     for (int i = 0; i < IMAGE_NUMBEROF_DIRECTORY_ENTRIES; i++)
     {
         IMAGE_DATA_DIRECTORY* dataDir = &ntHeader.OptionalHeader.DataDirectory[i];
-        if (dataDir->Size < 0 || dataDir->VirtualAddress < 0 ||
-            dataDir->VirtualAddress + dataDir->Size > ntHeader.OptionalHeader.SizeOfImage)
+        if (dataDir->VirtualAddress + dataDir->Size > ntHeader.OptionalHeader.SizeOfImage)
         {
             LPE_LOG("IMAGE_DATA_DIRECTORY has a bad VirtualAddress pointing outside of OptionalHeader.SizeOfImage\n");
             return close_win32_exe(result, file, LPE_BAD_IMAGE_DATA_DIRECTORY_VIRTUAL_ADDRESS);
@@ -242,29 +261,36 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
         return close_win32_exe(result, file, LPE_GET_FILE_SIZE_FAILED);
     }
 
-    // Set the virtual address which we will use to map virtual addresses to/from our real memory addresses
-    if (memmgr_get_base_virtual_address(&cpu->Memory) != 0)
+    if (isMainModule)
     {
-        LPE_LOG("Base virtual address already set in memmgr\n");
-        return close_win32_exe(result, file, LPE_BASE_VIRTUAL_ADDRESS_ALREADY_ASSIGNED);
+        // Set the virtual address which we will use to map virtual addresses to/from our real memory addresses
+        if (memmgr_get_base_virtual_address(&cpu->Memory) != 0)
+        {
+            LPE_LOG("Base virtual address already set in memmgr\n");
+            return close_win32_exe(result, file, LPE_BASE_VIRTUAL_ADDRESS_ALREADY_ASSIGNED);
+        }
+        memmgr_set_base_virtual_address(&cpu->Memory, ntHeader.OptionalHeader.ImageBase);
     }
-    memmgr_set_base_virtual_address(&cpu->Memory, ntHeader.OptionalHeader.ImageBase);
 
-    // We have validated the file enough so that we can now set up the memory for the "virtual process"
-    // TODO: Rename this to be something like "moduleMem" to avoid confusion with "virtualProcessMemory" / virtual addresses in structs
-    // TODO: If renamed to "moduleMem" (and if we eventually implement dlls) we should change checks which are based on ImageBase.
-    // NOTE: No need to free this memory as it is managed by the fixed buffer memory manager
-    uint8_t* virtualProcessMemory = memmgr_alloc(&cpu->Memory, ntHeader.OptionalHeader.SizeOfImage);
-    uint8_t* moduleMemoryEnd = virtualProcessMemory + ntHeader.OptionalHeader.SizeOfImage;
-    if (virtualProcessMemory == NULL)
+    // We have validated the file enough so that we can now set up the memory for the module
+    size_t moduleAlign = 0x1000;
+    uint8_t* moduleMemory = memmgr_alloc(&cpu->Memory, ntHeader.OptionalHeader.SizeOfImage + moduleAlign);
+    if (moduleMemory == NULL)
     {
-        LPE_LOG("Failed to allocate memory for the read the exe data into memory\n");
+        LPE_LOG("Failed to allocate memory for the module '%s'. isMainModule: %d\n", fileName, isMainModule);
         return close_win32_exe(result, file, LPE_ALLOCATE_VIRTUAL_MEMORY_FAILED);
     }
+    // Align the module address (don't do this for the main module, as we will be loading directly at the desired address)
+    size_t moduleMemoryVAddr = memmgr_get_virtual_address(&cpu->Memory, (size_t)moduleMemory);
+    if (!isMainModule && moduleMemoryVAddr % moduleAlign != 0)
+    {
+        moduleMemory += moduleAlign - (moduleMemoryVAddr % moduleAlign);
+    }
+    uint8_t* moduleMemoryEnd = moduleMemory + ntHeader.OptionalHeader.SizeOfImage;
 
     // This HAS to be our first allocation to memmgr as this address will be our base address for mapping virtual
     // memory to real memory addresses and as such this pointer must point to the first byte in the memmgr data
-    if (!memmgr_is_first_pointer(&cpu->Memory, virtualProcessMemory))
+    if (isMainModule && !memmgr_is_first_pointer(&cpu->Memory, moduleMemory))
     {
         LPE_LOG("mmgr is broken or something used the allocator before loading the binary. The binary must be the "
             "first entry in the virtual memory so that we can properly validate memory bounds.\n");
@@ -278,7 +304,7 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
         LPE_LOG("Failed to seek to the start of the file\n");
         return close_win32_exe(result, file, LPE_SEEK_FILE_START_FAILED);
     }
-    if (fread(virtualProcessMemory, 1, peHeaderSize, file) != peHeaderSize)
+    if (fread(moduleMemory, 1, peHeaderSize, file) != peHeaderSize)
     {
         LPE_LOG("Failed to copy the Portable Executable header to the virtual process memory\n");
         return close_win32_exe(result, file, LPE_COPY_PE_HEADER_FAILED);
@@ -303,7 +329,7 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
                 return close_win32_exe(result, file, LPE_READ_IMAGE_SECTION_HEADER_DATA_FAILED);
             }
 
-            if (fread(virtualProcessMemory + section->VirtualAddress, 1, section->SizeOfRawData, file) != section->SizeOfRawData)
+            if (fread(moduleMemory + section->VirtualAddress, 1, section->SizeOfRawData, file) != section->SizeOfRawData)
             {
                 LPE_LOG("Failed to read the data of a IMAGE_SECTION_HEADER\n");
                 return close_win32_exe(result, file, LPE_READ_IMAGE_SECTION_HEADER_DATA_FAILED);
@@ -320,7 +346,7 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
     // We don't need to do base relocation fixups if the virtual address matches up to ImageBase. If we ever support dll loading we will.
     // For now this code doesn't serve any real purpose as the check *should* always fail (and as such the following code is untested).
     IMAGE_DATA_DIRECTORY baseRelocDataDir = ntHeader.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_BASERELOC];
-    size_t loadedImageBaseAddress = memmgr_get_virtual_address(&cpu->Memory, (size_t)virtualProcessMemory);
+    size_t loadedImageBaseAddress = memmgr_get_virtual_address(&cpu->Memory, (size_t)moduleMemory);
     if (baseRelocDataDir.VirtualAddress > 0 && baseRelocDataDir.Size > 0 && loadedImageBaseAddress != ntHeader.OptionalHeader.ImageBase)
     {
         // Remove this warning if we ever support dll loading
@@ -329,10 +355,10 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
         // Get the difference between OptionalHeader.ImageBase and the actual address of the exe/dll in memory
         size_t imageBaseDifference = loadedImageBaseAddress - ntHeader.OptionalHeader.ImageBase;
 
-        IMAGE_BASE_RELOCATION* reloc = (IMAGE_BASE_RELOCATION*)(virtualProcessMemory + baseRelocDataDir.VirtualAddress);
+        IMAGE_BASE_RELOCATION* reloc = (IMAGE_BASE_RELOCATION*)(moduleMemory + baseRelocDataDir.VirtualAddress);
         while (reloc->VirtualAddress != 0)
         {
-            //Make sure the current block contains enough data to hold relocation descriptors
+            // Make sure the current block contains enough data to hold relocation descriptors
             if (reloc->SizeOfBlock >= sizeof(IMAGE_BASE_RELOCATION))
             {
                 DWORD numRelocDescriptors = (reloc->SizeOfBlock - sizeof(IMAGE_BASE_RELOCATION)) / sizeof(WORD);
@@ -342,7 +368,7 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
                     if (relocDescriptors[i] > 0)
                     {
                         // Get the address in memory and update the offset based on the ImageBase difference
-                        PDWORD ptr = (PDWORD)((LPBYTE)virtualProcessMemory + (reloc->VirtualAddress + (relocDescriptors[i] & 0xFFF)));
+                        PDWORD ptr = (PDWORD)((LPBYTE)moduleMemory + (reloc->VirtualAddress + (relocDescriptors[i] & 0xFFF)));
                         if ((size_t)ptr + sizeof(DWORD) >= (size_t)moduleMemoryEnd)
                         {
                             LPE_LOG("[WARNING] IMAGE_BASE_RELOCATION descriptor points outside the bounds of the binary\n");
@@ -358,25 +384,132 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
         }
     }
     
-    // Initialize the API imports (dll functions used by the target binary, which we need to provide implementations for)
-    cpu_init_imports(cpu);
+    if (isMainModule)
+    {
+        // Initialize the API imports (dll functions used by the target binary, which we need to provide implementations for)
+        cpu_init_imports(cpu);
+        
+        // Initialize the map for API exports defined in internal modules
+        map_init(&cpu->ModuleExportsMap);
+    }
 
+    // Handle dll exports
+    IMAGE_DATA_DIRECTORY exportDataDir = ntHeader.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (exportDataDir.VirtualAddress > 0 && exportDataDir.Size > 0)
+    {
+        IMAGE_EXPORT_DIRECTORY* exportDir = (IMAGE_EXPORT_DIRECTORY*)(moduleMemory + exportDataDir.VirtualAddress);
+        
+        DWORD moduleNameAddr = exportDir->Name;
+        if (moduleMemory + moduleNameAddr >= moduleMemoryEnd)
+        {
+            LPE_LOG("IMAGE_EXPORT_DIRECTORY dll name pointer points outside the bounds of the binary.\n");
+            return close_win32_exe(result, file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_DLL_NAME);
+        }
+        strcpy(moduleInfo->Name, (char*)(moduleMemory + moduleNameAddr));
+        
+        DWORD* functionTable = (DWORD*)(moduleMemory + exportDir->AddressOfFunctions);
+        DWORD* nameTable = (DWORD*)(moduleMemory + exportDir->AddressOfNames);
+        WORD* ordinalTable = (WORD*)(moduleMemory + exportDir->AddressOfNameOrdinals);
+        for (DWORD i = 0; i < exportDir->NumberOfNames; i++)
+        {
+            DWORD exportNameAddr = nameTable[i];
+            if (moduleMemory + exportNameAddr >= moduleMemoryEnd)
+            {
+                LPE_LOG("IMAGE_EXPORT_DIRECTORY dll export name points outside the bounds of the binary.\n");
+                return close_win32_exe(result, file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_NAME);
+            }
+            
+            char* exportName = (char*)(moduleMemory + exportNameAddr);
+            WORD ordinal = ordinalTable[i];
+            if (ordinal >= exportDir->NumberOfFunctions)
+            {
+                LPE_LOG("IMAGE_EXPORT_DIRECTORY export ordinal index is larger than the number of functions.\n");
+                return close_win32_exe(result, file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_ORDINAL);
+            }
+            
+            DWORD exportAddr = functionTable[ordinal];
+            if (exportAddr >= exportDataDir.VirtualAddress && exportAddr < exportDataDir.VirtualAddress + exportDataDir.Size)
+            {
+                // TODO: Handle dll export forwarders (these point within IMAGE_DIRECTORY_ENTRY_EXPORT)
+                // This should be in the format "MyDllName.MyFunctionName" (or "MyDllName.#1", where #XXX is an ordinal)
+                char* forwardedExport = (char*)(moduleMemory + exportAddr);
+            }
+            else
+            {
+                if (moduleMemory + exportAddr >= moduleMemoryEnd)
+                {
+                    LPE_LOG("IMAGE_EXPORT_DIRECTORY export address points outside the bounds of the binary.\n");
+                    return close_win32_exe(result, file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_ADDRESS);
+                }
+                
+                char targetFuncName[MAX_FUNC_NAME_LEN] = {0};
+                int32_t isExternalApiFunc = 0;
+                if (strlen(exportName) > 8 && strncmp(exportName, "wc86dll_", 8) == 0)
+                {
+                    strcpy(targetFuncName, exportName + 8);
+                }
+                else
+                {
+                    // Append the module name (without the dll extension)
+                    for (int i = 0; ; i++)
+                    {
+                        char c = moduleInfo->Name[i];
+                        if (!c || c == '.')
+                        {
+                            targetFuncName[i] = '_';
+                            break;
+                        }
+                        targetFuncName[i] = tolower(c);
+                    }
+                    strcat(targetFuncName, exportName);
+                }
+                map_set(&cpu->ModuleExportsMap, targetFuncName, (uint32_t)memmgr_get_virtual_address(&cpu->Memory, (size_t)(moduleMemory + exportAddr)));
+            }
+            //printf("FuncExport: %s %s\n", moduleInfo->Name, exportName);
+        }
+        /*const char* key;
+        map_iter_t iter = map_iter(&cpu->ModuleExportsMap);
+        while ((key = map_next(&cpu->ModuleExportsMap, &iter)))
+        {
+            printf("%s -> %x\n", key, memmgr_get_virtual_address(&cpu->Memory, (size_t)*map_get(&cpu->ModuleExportsMap, key)));
+        }*/
+    }
+    else
+    {
+        // There isn't an export table, but we still want to get the name of the module (without file path info).
+        const char* fileNameWithoutPath = fileName;
+        const char* c = fileName;
+        while (*c != '\0')
+        {
+            if ((*c == '\\' || *c == '/'))
+            {
+                fileNameWithoutPath = c + 1;
+            }
+            c++;
+        }
+        if (*fileNameWithoutPath == '\0')
+        {
+            fileNameWithoutPath = fileName;
+        }
+        strcpy(moduleInfo->Name, fileNameWithoutPath);
+    }
+    
     // Handle dll imports
     IMAGE_DATA_DIRECTORY importDescriptorDataDir = ntHeader.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
     if (importDescriptorDataDir.VirtualAddress > 0 && importDescriptorDataDir.Size > 0)
     {
-        IMAGE_IMPORT_DESCRIPTOR* importDescriptor = (IMAGE_IMPORT_DESCRIPTOR*)(virtualProcessMemory + importDescriptorDataDir.VirtualAddress);
+        IMAGE_IMPORT_DESCRIPTOR* importDescriptor = (IMAGE_IMPORT_DESCRIPTOR*)(moduleMemory + importDescriptorDataDir.VirtualAddress);
         IMAGE_IMPORT_DESCRIPTOR emptyEmportDescriptor = { 0 };
         while (memcmp(importDescriptor, &emptyEmportDescriptor, sizeof(IMAGE_IMPORT_DESCRIPTOR)) != 0)
         {
-            if (importDescriptor->Name < 0 || virtualProcessMemory + importDescriptor->Name >= moduleMemoryEnd)
+            if (moduleMemory + importDescriptor->Name >= moduleMemoryEnd)
             {
                 LPE_LOG("IMAGE_IMPORT_DESCRIPTOR dll name points outside the bounds of the binary.\n");
                 return close_win32_exe(result, file, LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_NAME);
             }
 
             // Get the name of the dll
-            char* importDllName = (char*)(virtualProcessMemory + importDescriptor->Name);
+            char* importDllName = (char*)(moduleMemory + importDescriptor->Name);
 
             if (strlen(importDllName) == 0)
             {
@@ -392,28 +525,54 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
                 // I *think* OriginalFirstThunk CAN be 0 in the file. We would need to allocate space for these and fill them in.
                 LPE_LOG("Need to handle OriginalFirstThunk / FirstThunk 0 values in IMAGE_IMPORT_DESCRIPTOR? (%s).\n", importDllName);
             }
-            else if (importDescriptor->FirstThunk < 0 || importDescriptor->OriginalFirstThunk < 0 ||
-                virtualProcessMemory + importDescriptor->FirstThunk + sizeof(size_t) >= moduleMemoryEnd ||
-                virtualProcessMemory + importDescriptor->OriginalFirstThunk + sizeof(size_t) >= moduleMemoryEnd)
+            else if (moduleMemory + importDescriptor->FirstThunk + sizeof(size_t) >= moduleMemoryEnd ||
+                moduleMemory + importDescriptor->OriginalFirstThunk + sizeof(size_t) >= moduleMemoryEnd)
             {
                 LPE_LOG("IMAGE_IMPORT_DESCRIPTOR has virtual addresses which points outside the bounds of the binary.\n");
                 return close_win32_exe(result, file, LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_VIRTUAL_ADDRESS);
             }
             else
             {
-                // TODO: If we ever support loading dlls we should load it now (or queue it and load it just before calling our entry point function)
+                if (isMainModule)
+                {
+                    // Load the clib / user lib.
+                    // TODO: Support loading arbitary dlls (which were compiled with TCC)
+                    
+                    // TODO: Lookup of dlls in various locations
+                    
+                    ExeLoadResult dllLoadResult;
+                    load_win32_exe(cpu, &dllLoadResult, "CLib.dll", &cpu->CLibModule);
+                    load_win32_exe(cpu, &dllLoadResult, "UserLib.dll", &cpu->UserLibModule);
+                }
                 
                 // NOTE: The following doesn't allow for advanced situations where there are dll relocations or non standard thunk values 
                 //       (it expects that both FirstThunk and OriginalFirstThunk are assigned properly in the file data).
-                //These are really IMAGE_THUNK_DATA*
+                // These are really IMAGE_THUNK_DATA*
                 DWORD firstThunk = importDescriptor->FirstThunk;
-                DWORD* thunkData = (DWORD*)(virtualProcessMemory + importDescriptor->FirstThunk);
-                DWORD* originalThunkData = (DWORD*)(virtualProcessMemory + importDescriptor->OriginalFirstThunk);
+                DWORD* thunkData = (DWORD*)(moduleMemory + importDescriptor->FirstThunk);
+                DWORD* originalThunkData = (DWORD*)(moduleMemory + importDescriptor->OriginalFirstThunk);
+                
+                char mappedImportName[MAX_FUNC_NAME_LEN];
+                size_t mappedImportNameDllIndex = 0;
+                for (int i = 0; ; i++)
+                {
+                    char c = importDllName[i];
+                    if (!c || c == '.')
+                    {
+                        mappedImportName[i] = '_';
+                        mappedImportNameDllIndex = i + 1;
+                        break;
+                    }
+                    mappedImportName[i] = tolower(c);
+                }
 
                 while ((size_t)originalThunkData + sizeof(DWORD) < (size_t)moduleMemoryEnd &&
                     (size_t)thunkData + sizeof(DWORD) < (size_t)moduleMemoryEnd &&
                     *originalThunkData != 0)
                 {
+                    // Reset the internal import name to just the dll name (no extension)
+                    mappedImportName[mappedImportNameDllIndex] = '\0';
+                    
                     if (*originalThunkData & IMAGE_ORDINAL_FLAG32)
                     {
                         // Import by ordinal
@@ -427,29 +586,39 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
                         // The virtual address of the function name string
                         DWORD originalThunkNameVA = *originalThunkData;
 
-                        if (virtualProcessMemory + originalThunkNameVA + sizeof(IMAGE_IMPORT_BY_NAME) >= moduleMemoryEnd)
+                        if (moduleMemory + originalThunkNameVA + sizeof(IMAGE_IMPORT_BY_NAME) >= moduleMemoryEnd)
                         {   
                             LPE_LOG("IMAGE_IMPORT_BY_NAME string points outside of the bounds of the binary\n");
                             return close_win32_exe(result, file, LPE_BAD_IMAGE_IMPORT_BY_NAME);
                         }
                         
                         // TODO: If we want to support loading dlls we should by map imports to the dll exports
-                        IMAGE_IMPORT_BY_NAME* importByName = (IMAGE_IMPORT_BY_NAME*)(virtualProcessMemory + originalThunkNameVA);
+                        IMAGE_IMPORT_BY_NAME* importByName = (IMAGE_IMPORT_BY_NAME*)(moduleMemory + originalThunkNameVA);
                         const char* importName = (const char*)importByName->Name;
 
-                        ImportInfo* import = cpu_find_import(cpu, targetName, importDllName, importName);
-                        if (import == NULL)
+                        // Try finding the import from mapped modules, otherwise look at the manually implemented imports
+                        strcat(mappedImportName, importName);
+                        uint32_t* mappedImportAddr = map_get(&cpu->ModuleExportsMap, mappedImportName);
+                        if (mappedImportAddr != NULL)
                         {
-                            import = cpu->UnhandledFunctionImport;
-                            printf("Unresolved import %s %s\n", importDllName, importName);
+                            *thunkData = (DWORD)(*mappedImportAddr);
+                            printf("Resolved import (mapped) %s %s\n", importDllName, importName);
                         }
                         else
                         {
-                            import->ThunkAddress = (uint32_t)(ntHeader.OptionalHeader.ImageBase + ((size_t)thunkData - (size_t)virtualProcessMemory));
-                            printf("Resolved import %s %s\n", importDllName, importName);
+                            ImportInfo* import = cpu_find_import(cpu, importDllName, importName);
+                            if (import == NULL)
+                            {
+                                import = cpu->UnhandledFunctionImport;
+                                printf("Unresolved import %s %s\n", importDllName, importName);
+                            }
+                            else
+                            {
+                                import->ThunkAddress = (uint32_t)(ntHeader.OptionalHeader.ImageBase + ((size_t)thunkData - (size_t)moduleMemory));
+                                printf("Resolved import %s %s\n", importDllName, importName);
+                            }
+                            *thunkData = (DWORD)cpu_get_virtual_address(cpu, import);
                         }
-
-                        *thunkData = (DWORD)cpu_get_virtual_address(cpu, import);
                     }
                     
                     thunkData++;
@@ -459,7 +628,7 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
             importDescriptor++;
         }
     }
-        
+
     // Now that the exe is loaded into memory we need to initialize some of the following things
     // NOTE: As these are required to be used in conjunction with segment registers we will set these up
     //       inside the emulator. This might need to be generalized if we support multiple emulators.
@@ -468,12 +637,15 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* targe
     // Global Descriptor Table (GDT)
     // Local Descriptor Table (LDT)
 
-    result->ErrorCode = 0;
-    result->Address = (size_t)virtualProcessMemory;
-    result->AddressOfEntryPoint = result->Address + ntHeader.OptionalHeader.AddressOfEntryPoint;
-    result->VirtualAddress = ntHeader.OptionalHeader.ImageBase;
-    result->VirtualAddressOfEntryPoint = result->VirtualAddress + ntHeader.OptionalHeader.AddressOfEntryPoint;
-    result->ImageSize = ntHeader.OptionalHeader.SizeOfImage;
+    if (isMainModule)
+    {
+        result->ErrorCode = 0;
+        result->Address = (size_t)moduleMemory;
+        result->AddressOfEntryPoint = result->Address + ntHeader.OptionalHeader.AddressOfEntryPoint;
+        result->VirtualAddress = ntHeader.OptionalHeader.ImageBase;
+        result->VirtualAddressOfEntryPoint = result->VirtualAddress + ntHeader.OptionalHeader.AddressOfEntryPoint;
+        result->ImageSize = ntHeader.OptionalHeader.SizeOfImage;
+    }
 
     return close_win32_exe(result, file, 0);
 }
@@ -491,16 +663,18 @@ int main()
     if (memmgr_init(&cpu.Memory, totalMemorySize) != 0)
     {
         printf("Failed to initialize the emulator memory of size %08x\n", totalMemorySize);
+        cpu_destroy(&cpu);
         getchar();
         return;
     }
     printf("Total memory size: %08x (%llu)\n", totalMemorySize, (uint64_t)totalMemorySize);
     
     ExeLoadResult loadResult;
-    load_win32_exe(&cpu, &loadResult, "test", fileName);
+    load_win32_exe(&cpu, &loadResult, fileName, &cpu.MainModule);
     if (loadResult.ErrorCode != 0 || cpu.ErrorCode != 0)
     {
         printf("Load exe failed.\n");
+        cpu_destroy(&cpu);
         getchar();
         return 1;
     }
@@ -511,6 +685,7 @@ int main()
     if (cpu.ErrorCode != 0)
     {
         printf("cpu_init failed.\n");
+        cpu_destroy(&cpu);
         getchar();
         return 2;
     }
@@ -525,7 +700,6 @@ int main()
     }
     
     cpu_destroy(&cpu);
-    memmgr_destroy(&cpu.Memory);
     
     if (cpu.ErrorCode == 0)
     {

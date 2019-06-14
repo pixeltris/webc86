@@ -101,20 +101,20 @@ void cpu_init_user_defined_imports(CPU* cpu, int32_t* counter)
 
 void cpu_init_common_imports(CPU* cpu, int32_t* counter)
 {
-    cpu_define_import(cpu, counter, NULL, "msvcrt.dll", "__set_app_type", import_ignore);
-    cpu_define_import(cpu, counter, NULL, "msvcrt.dll", "_controlfp", import_ignore);
-    cpu_define_import(cpu, counter, NULL, "msvcrt.dll", "exit", import_exit);
-    cpu_define_import(cpu, counter, NULL, "msvcrt.dll", "__getmainargs", import_getmainargs);
-    cpu_define_import(cpu, counter, NULL, "msvcrt.dll", "printf", import_printf);
+    cpu_define_import(cpu, counter, "msvcrt.dll", "__set_app_type", import_ignore);
+    cpu_define_import(cpu, counter, "msvcrt.dll", "_controlfp", import_ignore);
+    cpu_define_import(cpu, counter, "msvcrt.dll", "exit", import_exit);
+    cpu_define_import(cpu, counter, "msvcrt.dll", "__getmainargs", import_getmainargs);
+    cpu_define_import(cpu, counter, "msvcrt.dll", "printf", import_printf);
     
-    cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "__argc", 4);
-    cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "__argv", 4);
-    cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "_environ", 4);
-    cpu_define_data_import(cpu, counter, NULL, "msvcrt.dll", "_iob", 32 * 20);// 20 FILE entries
+    cpu_define_data_import(cpu, counter, "msvcrt.dll", "__argc", 4);
+    cpu_define_data_import(cpu, counter, "msvcrt.dll", "__argv", 4);
+    cpu_define_data_import(cpu, counter, "msvcrt.dll", "_environ", 4);
+    cpu_define_data_import(cpu, counter, "msvcrt.dll", "_iob", 32 * 20);// 20 FILE entries
     
-    cpu_define_import(cpu, counter, NULL, "webc86.dll", "wc86_assert", import_wc86_assert);
-    cpu_define_import(cpu, counter, NULL, "webc86.dll", "wc86_assertI32", import_wc86_assertI32);
-    cpu_define_import(cpu, counter, NULL, "webc86.dll", "wc86_assertU32", import_wc86_assertU32);
+    cpu_define_import(cpu, counter, "webc86.dll", "wc86_assert", import_wc86_assert);
+    cpu_define_import(cpu, counter, "webc86.dll", "wc86_assertI32", import_wc86_assertI32);
+    cpu_define_import(cpu, counter, "webc86.dll", "wc86_assertU32", import_wc86_assertU32);
 }
 
 void cpu_init_imports(CPU* cpu)
@@ -141,7 +141,6 @@ void cpu_init_imports(CPU* cpu)
             cpu->ImportsEndAddress = cpu_get_virtual_address(cpu, (void*)(((size_t)cpu->Imports) + memSize));
             
             // Set up the handler for unhandled imports
-            cpu->Imports[0].TargetBinaryName = NULL;
             cpu->Imports[0].DllName = NULL;
             cpu->Imports[0].Name = NULL;
             cpu->Imports[0].Callback = import_unresolved;
@@ -154,7 +153,7 @@ void cpu_init_imports(CPU* cpu)
         // Common function imports
         cpu_init_common_imports(cpu, &funcsCounter);
         
-        // Target binary specific function imports
+        // User defined function imports
         cpu_init_user_defined_imports(cpu, &funcsCounter);
         
         if (i == 0)
@@ -190,7 +189,7 @@ void cpu_allocate_data_imports(CPU* cpu)
     }
 }
 
-ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, FuncImportCallbackSig function, uint32_t dataSize)
+ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* dllName, const char* name, FuncImportCallbackSig function, uint32_t dataSize)
 {
     if (dllName != NULL && name != NULL)
     {
@@ -199,7 +198,6 @@ ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* targetN
         
         if (cpu->Imports != NULL && index < cpu->NumImports)
         {
-            cpu->Imports[index].TargetBinaryName = targetName;
             cpu->Imports[index].DllName = dllName;
             cpu->Imports[index].Name = name;
             cpu->Imports[index].Callback = function;
@@ -212,43 +210,26 @@ ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* targetN
     return NULL;
 }
 
-ImportInfo* cpu_define_import(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, FuncImportCallbackSig function)
+ImportInfo* cpu_define_import(CPU* cpu, int32_t* counter, const char* dllName, const char* name, FuncImportCallbackSig function)
 {
-    return cpu_define_import_ex(cpu, counter, targetName, dllName, name, function, 0);
+    return cpu_define_import_ex(cpu, counter, dllName, name, function, 0);
 }
 
-ImportInfo* cpu_define_data_import(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, uint32_t dataSize)
+ImportInfo* cpu_define_data_import(CPU* cpu, int32_t* counter, const char* dllName, const char* name, uint32_t dataSize)
 {
-    return cpu_define_import_ex(cpu, counter, targetName, dllName, name, NULL, dataSize);
+    return cpu_define_import_ex(cpu, counter, dllName, name, NULL, dataSize);
 }
 
-ImportInfo* cpu_find_import(CPU* cpu, const char* targetName, const char* dllName, const char* name)
+ImportInfo* cpu_find_import(CPU* cpu, const char* dllName, const char* name)
 {
     // TODO: Use our own version of _stricmp as this wont compile outside of Windows
-    
-    // Find a matching import (for the specific target binary)
-    if (targetName != NULL)
-    {
-        for (int32_t i = 1; i < cpu->NumImports; i++)
-        {
-            if (cpu->Imports[i].TargetBinaryName != NULL &&
-                cpu->Imports[i].DllName != NULL &&
-                cpu->Imports[i].Name != NULL &&
-                _stricmp(cpu->Imports[i].TargetBinaryName, targetName) == 0 &&
-                _stricmp(cpu->Imports[i].DllName, dllName) == 0 &&
-                strcmp(cpu->Imports[i].Name, name) == 0)
-            {
-                return &cpu->Imports[i];
-            }
-        }
-    }
+    // TODO: Switch to using a hashmap lookup
     
     // Find a matching import
+    // NOTE: Index 0 is reserved for unhandled exports
     for (int32_t i = 1; i < cpu->NumImports; i++)
     {
-        if (cpu->Imports[i].DllName != NULL &&
-            cpu->Imports[i].Name != NULL &&
-            _stricmp(cpu->Imports[i].DllName, dllName) == 0 &&
+        if (_stricmp(cpu->Imports[i].DllName, dllName) == 0 &&
             strcmp(cpu->Imports[i].Name, name) == 0)
         {
             return &cpu->Imports[i];

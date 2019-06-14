@@ -6,6 +6,8 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include "memmgr.h"
+#include "image.h"
+#include "map.h"
 
 #define CPU_WITH_DEBUG 1
 
@@ -58,13 +60,15 @@
 // all arithmetic flags
 #define FLAGS_ALL (FLAG_CARRY | FLAG_PARITY | FLAG_ADJUST | FLAG_ZERO | FLAG_SIGN | FLAG_OVERFLOW)
 
+#define MAX_MODULE_NAME_LEN 260
+#define MAX_FUNC_NAME_LEN 4096
+
 typedef struct tCPU CPU;
 
 typedef void(*FuncImportCallbackSig)(CPU* cpu);
 
 typedef struct
 {
-    const char* TargetBinaryName;
     const char* DllName;
     const char* Name;
     FuncImportCallbackSig Callback;
@@ -73,6 +77,15 @@ typedef struct
     uint32_t DataAddress;
     uint32_t ThunkAddress;
 } ImportInfo;
+
+typedef struct
+{
+    int32_t IsLoaded;
+    uint32_t VirtualAddress;// The virtual address of the loaded module
+    uint32_t VirtualAddressOfEntryPoint;// Virtual address of the first instruction to execute
+    uint32_t ImageSize;// ntHeader.OptionalHeader.SizeOfImage
+    char Name[MAX_MODULE_NAME_LEN];
+} ModuleInfo;
 
 typedef union
 {
@@ -110,6 +123,14 @@ struct tCPU
     uint32_t VirtualEntryPointAddress;// The virtual address of the first instruction to execute
     
     MemMgr Memory;
+
+    ModuleInfo MainModule;// Exe module
+    ModuleInfo CLibModule;// C lib dll
+    ModuleInfo UserLibModule;// User lib dll
+    
+    // Map from module+function name to target function address. This is used for CLibModule/UserLibModule where API
+    // functions usually defined in external DLLs (such as kernel32.dll) are actually defined in one of our modules.
+    map_uint32_t ModuleExportsMap;
     
     int32_t NumImports;
     ImportInfo* Imports;// Allocated into a single block of memory
@@ -142,10 +163,10 @@ struct tCPU
 
 void cpu_init_imports(CPU* cpu);
 void cpu_allocate_data_imports(CPU* cpu);
-ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, FuncImportCallbackSig function, uint32_t dataSize);
-ImportInfo* cpu_define_import(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, FuncImportCallbackSig function);
-ImportInfo* cpu_define_data_import(CPU* cpu, int32_t* counter, const char* targetName, const char* dllName, const char* name, uint32_t dataSize);
-ImportInfo* cpu_find_import(CPU* cpu, const char* targetName, const char* dllName, const char* name);
+ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* dllName, const char* name, FuncImportCallbackSig function, uint32_t dataSize);
+ImportInfo* cpu_define_import(CPU* cpu, int32_t* counter, const char* dllName, const char* name, FuncImportCallbackSig function);
+ImportInfo* cpu_define_data_import(CPU* cpu, int32_t* counter, const char* dllName, const char* name, uint32_t dataSize);
+ImportInfo* cpu_find_import(CPU* cpu, const char* dllName, const char* name);
 
 void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, uint32_t imageSize, uint32_t heapSize, uint32_t stackSize);
 void cpu_destroy(CPU* cpu);

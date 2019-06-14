@@ -48,6 +48,7 @@ void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, u
 void cpu_destroy(CPU* cpu)
 {
     memmgr_destroy(&cpu->Memory);
+    map_deinit(&cpu->ModuleExportsMap);
 }
 
 void cpu_onerror(CPU* cpu, char* error, ...)
