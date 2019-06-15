@@ -349,8 +349,10 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     size_t loadedImageBaseAddress = memmgr_get_virtual_address(&cpu->Memory, (size_t)moduleMemory);
     if (baseRelocDataDir.VirtualAddress > 0 && baseRelocDataDir.Size > 0 && loadedImageBaseAddress != ntHeader.OptionalHeader.ImageBase)
     {
-        // Remove this warning if we ever support dll loading
-        LPE_LOG("[WARNING] Virtual address of the exe doesn't align up with base virtual address\n");
+        if (isMainModule)
+        {
+            LPE_LOG("[WARNING] Virtual address of the exe doesn't align up with base virtual address\n");
+        }
         
         // Get the difference between OptionalHeader.ImageBase and the actual address of the exe/dll in memory
         size_t imageBaseDifference = loadedImageBaseAddress - ntHeader.OptionalHeader.ImageBase;
@@ -494,6 +496,18 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
         strcpy(moduleInfo->Name, fileNameWithoutPath);
     }
     
+    if (isMainModule)
+    {
+        // Load the clib / user lib.
+        // TODO: Support loading arbitary dlls (compiled by TCC)
+        
+        // TODO: Lookup of dlls in various locations
+        
+        ExeLoadResult dllLoadResult;
+        load_win32_exe(cpu, &dllLoadResult, "CLib.dll", &cpu->CLibModule);
+        load_win32_exe(cpu, &dllLoadResult, "UserLib.dll", &cpu->UserLibModule);
+    }
+    
     // Handle dll imports
     IMAGE_DATA_DIRECTORY importDescriptorDataDir = ntHeader.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
     if (importDescriptorDataDir.VirtualAddress > 0 && importDescriptorDataDir.Size > 0)
@@ -532,19 +546,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                 return close_win32_exe(result, file, LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_VIRTUAL_ADDRESS);
             }
             else
-            {
-                if (isMainModule)
-                {
-                    // Load the clib / user lib.
-                    // TODO: Support loading arbitary dlls (which were compiled with TCC)
-                    
-                    // TODO: Lookup of dlls in various locations
-                    
-                    ExeLoadResult dllLoadResult;
-                    load_win32_exe(cpu, &dllLoadResult, "CLib.dll", &cpu->CLibModule);
-                    load_win32_exe(cpu, &dllLoadResult, "UserLib.dll", &cpu->UserLibModule);
-                }
-                
+            {                
                 // NOTE: The following doesn't allow for advanced situations where there are dll relocations or non standard thunk values 
                 //       (it expects that both FirstThunk and OriginalFirstThunk are assigned properly in the file data).
                 // These are really IMAGE_THUNK_DATA*
@@ -652,7 +654,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
 
 int main()
 {
-    const char* fileName = "C:\\main.exe";
+    const char* fileName = "main2.exe";//"C:\\main.exe";
     
     CPU cpu;
     memset(&cpu, 0, sizeof(CPU));
