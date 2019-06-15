@@ -546,9 +546,8 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                 return close_win32_exe(result, file, LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_VIRTUAL_ADDRESS);
             }
             else
-            {                
-                // NOTE: The following doesn't allow for advanced situations where there are dll relocations or non standard thunk values 
-                //       (it expects that both FirstThunk and OriginalFirstThunk are assigned properly in the file data).
+            {
+                // NOTE: The following currently assumes that BOTH FirstThunk and OriginalFirstThunk are assigned in the file.
                 // These are really IMAGE_THUNK_DATA*
                 DWORD firstThunk = importDescriptor->FirstThunk;
                 DWORD* thunkData = (DWORD*)(moduleMemory + importDescriptor->FirstThunk);
@@ -594,7 +593,6 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                             return close_win32_exe(result, file, LPE_BAD_IMAGE_IMPORT_BY_NAME);
                         }
                         
-                        // TODO: If we want to support loading dlls we should by map imports to the dll exports
                         IMAGE_IMPORT_BY_NAME* importByName = (IMAGE_IMPORT_BY_NAME*)(moduleMemory + originalThunkNameVA);
                         const char* importName = (const char*)importByName->Name;
 
@@ -616,7 +614,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                             }
                             else
                             {
-                                import->ThunkAddress = (uint32_t)(ntHeader.OptionalHeader.ImageBase + ((size_t)thunkData - (size_t)moduleMemory));
+                                import->ThunkAddress = (uint32_t)cpu_get_virtual_address(cpu, thunkData);
                                 printf("Resolved import %s %s\n", importDllName, importName);
                             }
                             *thunkData = (DWORD)cpu_get_virtual_address(cpu, import);
