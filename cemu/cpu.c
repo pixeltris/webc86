@@ -398,7 +398,7 @@ int32_t cpu_is_valid_address(CPU* cpu, uint32_t addr, int32_t size)
     return addr >= cpu->VirtualMemoryAddress && addr < cpu->VirtualMemoryEndAddress;
 }
 
-uint32_t cpu_get_virtual_address(CPU* cpu, void* realAddress)
+uint32_t cpu_get_virtual_address(CPU* cpu, const void* realAddress)
 {
     return memmgr_get_virtual_address(&cpu->Memory, (size_t)realAddress);
 }
@@ -408,12 +408,17 @@ size_t cpu_get_real_address(CPU* cpu, uint32_t virtualAddress)
     return memmgr_get_real_address(&cpu->Memory, virtualAddress);
 }
 
-void cpu_validate_address(CPU* cpu, uint32_t address)
+void cpu_validate_virtual_address(CPU* cpu, uint32_t virtualAddress)
 {
-    if (address < cpu->VirtualMemoryAddress || address >= cpu->VirtualMemoryEndAddress)
+    if (virtualAddress && (virtualAddress < cpu->VirtualMemoryAddress || virtualAddress >= cpu->VirtualMemoryEndAddress))
     {
-        cpu_onerror(cpu, "cpu_validate_address failed Address:0x%08X MemStart:0x%08X MemEnd:0x%08X\n", address, cpu->VirtualMemory, cpu->VirtualMemoryEndAddress);
+        cpu_onerror(cpu, "cpu_validate_virtual_address failed Address:0x%08X MemStart:0x%08X MemEnd:0x%08X\n", virtualAddress, cpu->VirtualMemory, cpu->VirtualMemoryEndAddress);
     }
+}
+
+void cpu_validate_real_address(CPU* cpu, const void* realAddress)
+{
+    cpu_validate_virtual_address(cpu, memmgr_get_virtual_address(&cpu->Memory, (size_t)realAddress));
 }
 
 uint8_t cpu_read_op0F(CPU* cpu)

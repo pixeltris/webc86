@@ -138,6 +138,9 @@ struct tCPU
     uint32_t ImportsBeginAddress;// The address of where the imports start (virtul address)
     uint32_t ImportsEndAddress;// The address of where the imports end (virtul address) (ImportsBeginAddress + imports buffer size)
 
+    // Imports we need references to (this is mostly for data imports)
+    ImportInfo* Import_IOB;
+    
     FPU Fpu;
     
     uint32_t EIP;
@@ -225,9 +228,10 @@ void cpu_trigger_de(CPU* cpu);
 void cpu_trigger_ud(CPU* cpu);
 
 int32_t cpu_is_valid_address(CPU* cpu, uint32_t addr, int32_t size);
-uint32_t cpu_get_virtual_address(CPU* cpu, void* realAddress);
+uint32_t cpu_get_virtual_address(CPU* cpu, const void* realAddress);
 size_t cpu_get_real_address(CPU* cpu, uint32_t virtualAddress);
-void cpu_validate_address(CPU* cpu, uint32_t address);
+void cpu_validate_virtual_address(CPU* cpu, uint32_t virtualAddress);
+void cpu_validate_real_address(CPU* cpu, const void* realAddress);
 
 // These are all fetch functions
 uint8_t cpu_read_op0F(CPU* cpu);

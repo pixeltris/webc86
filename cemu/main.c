@@ -174,7 +174,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
 
     if (ntHeader.FileHeader.Machine != IMAGE_FILE_MACHINE_I386)
     {
-        LPE_LOG("Only x86 executables is supported (%04hX)\n", ntHeader.FileHeader.Machine);
+        LPE_LOG("Only x86 executables are supported (%04hX)\n", ntHeader.FileHeader.Machine);
         return close_win32_exe(result, file, LPE_UNSUPPORTED_ARCHITECTURE);
     }
 
@@ -351,7 +351,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     {
         if (isMainModule)
         {
-            LPE_LOG("[WARNING] Virtual address of the exe doesn't align up with base virtual address\n");
+            LPE_LOG("[WARNING] Virtual address of the exe in memory is different from the virtual address in the file\n");
         }
         
         // Get the difference between OptionalHeader.ImageBase and the actual address of the exe/dll in memory

@@ -62,12 +62,20 @@ void memmgr_set_base_virtual_address(MemMgr* memMgr, size_t baseVirtualAddress)
 
 size_t memmgr_get_virtual_address(MemMgr* memMgr, size_t realAddress)
 {
+    if (realAddress == 0)
+    {
+        return 0;
+    }
 	size_t dataAddress = memmgr_get_data_address(memMgr);
 	return memMgr->BaseVirtualAddress + (realAddress - dataAddress);
 }
 
 size_t memmgr_get_real_address(MemMgr* memMgr, size_t virtualAddress)
 {
+    if (virtualAddress == 0)
+    {
+        return 0;
+    }
 	size_t dataAddress = memmgr_get_data_address(memMgr);
 	return dataAddress + (virtualAddress - memMgr->BaseVirtualAddress);
 }

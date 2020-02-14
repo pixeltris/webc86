@@ -1,6 +1,9 @@
 #include "cpu.h"
 #include <string.h>
 
+#define SIZEOF_FILE 32
+#define IOB_NUM 20
+
 void import_unresolved(CPU* cpu)
 {
     printf("[WARNING] Unresolved dll import called! ret: 0x%08X\n", cpu->EIP);
@@ -85,14 +88,24 @@ void import_getmainargs(CPU* cpu)
     cpu->Reg[REG_EAX] = 0;
 }
 
-void import_printf(CPU* cpu)
+void import_fwrite(CPU* cpu)
 {
-    char* fmt = (char*)cpu_get_real_address(cpu, cpu_readU32(cpu, cpu_get_esp(cpu, 0)));
-    uint8_t* args = (uint8_t*)cpu_get_real_address(cpu, cpu_get_esp(cpu, 4));
+    const void* ptr = (const void*)cpu_get_real_address(cpu, cpu_readU32(cpu, cpu_get_esp(cpu, 0)));
+    size_t size = (size_t)cpu_readU32(cpu, cpu_get_esp(cpu, 4));
+    size_t count = (size_t)cpu_readU32(cpu, cpu_get_esp(cpu, 8));
+    void** stream = (void**)cpu_get_real_address(cpu, cpu_readU32(cpu, cpu_get_esp(cpu, 12)));
     
-    // %s needs to be mapped from virtual to real addresses
+    cpu_validate_real_address(cpu, ptr);
+    cpu_validate_real_address(cpu, stream);
     
-    printf("%s", fmt);
+    if (*stream)
+    {
+        cpu->Reg[REG_EAX] = fwrite(ptr, size, count, (FILE*)*stream);
+    }
+    else
+    {
+        cpu->Reg[REG_EAX] = 0;
+    }
 }
 
 void cpu_init_user_defined_imports(CPU* cpu, int32_t* counter)
@@ -105,12 +118,12 @@ void cpu_init_common_imports(CPU* cpu, int32_t* counter)
     cpu_define_import(cpu, counter, "msvcrt.dll", "_controlfp", import_ignore);
     cpu_define_import(cpu, counter, "msvcrt.dll", "exit", import_exit);
     cpu_define_import(cpu, counter, "msvcrt.dll", "__getmainargs", import_getmainargs);
-    cpu_define_import(cpu, counter, "msvcrt.dll", "printf", import_printf);
+    cpu_define_import(cpu, counter, "msvcrt.dll", "fwrite", import_fwrite);
     
     cpu_define_data_import(cpu, counter, "msvcrt.dll", "__argc", 4);
     cpu_define_data_import(cpu, counter, "msvcrt.dll", "__argv", 4);
     cpu_define_data_import(cpu, counter, "msvcrt.dll", "_environ", 4);
-    cpu_define_data_import(cpu, counter, "msvcrt.dll", "_iob", 32 * 20);// 20 FILE entries
+    cpu->Import_IOB = cpu_define_data_import(cpu, counter, "msvcrt.dll", "_iob", SIZEOF_FILE * IOB_NUM);// 20 FILE entries
     
     cpu_define_import(cpu, counter, "webc86.dll", "wc86_assert", import_wc86_assert);
     cpu_define_import(cpu, counter, "webc86.dll", "wc86_assertI32", import_wc86_assertI32);
@@ -185,6 +198,14 @@ void cpu_allocate_data_imports(CPU* cpu)
                 cpu->Imports[i].DataAddress = cpu_get_virtual_address(cpu, ptr);
                 cpu_writeU32(cpu, cpu->Imports[i].ThunkAddress, cpu->Imports[i].DataAddress);
             }
+        }
+        
+        if (cpu->Import_IOB)
+        {
+            size_t data = cpu_get_real_address(cpu, (uint32_t)cpu->Import_IOB->DataAddress);
+            *(void**)(data + (SIZEOF_FILE * 0)) = (void*)stdin;
+            *(void**)(data + (SIZEOF_FILE * 1)) = (void*)stdout;
+            *(void**)(data + (SIZEOF_FILE * 2)) = (void*)stderr;
         }
     }
 }
