@@ -1,1 +1,0 @@
-"tcc.exe" -shared -o CLib.dll string/memcpy.c string/memmove.c string/strcpy.c string/strlen.c test.c

@@ -77,24 +77,61 @@ ExeLoadResult* close_win32_exe(ExeLoadResult* result, FILE* file, int errorCode)
 }
 
 ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const char* fileName, ModuleInfo* moduleInfo);
-ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* fileName, ModuleInfo* moduleInfo)
+ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* fileName, ModuleInfo** outModuleInfo)
 {
-    load_win32_exe_internal(cpu, result, fileName, moduleInfo);
-    if (result->ErrorCode == 0)
+    // Check if the module is already loaded
     {
-        moduleInfo->IsLoaded = 1;
+        char moduleNameToLower[MAX_MODULE_NAME_LEN];
+        strcpylower(moduleNameToLower, path_to_short_path(fileName));
+        ModuleInfo** existingModule = map_get(&cpu->Modules, moduleNameToLower);
+        if (existingModule != NULL)
+        {
+            if (outModuleInfo != NULL)
+            {
+                *outModuleInfo = NULL;
+            }
+            result->ErrorCode = -3;
+            return result;
+        }
+    }
+    
+    ModuleInfo* module = (ModuleInfo*)calloc(1, sizeof(ModuleInfo));
+    if (outModuleInfo != NULL)
+    {
+        *outModuleInfo = module;
+    }
+    if (module == NULL)
+    {
+        result->ErrorCode = -2;
+    }
+    else
+    {
+        load_win32_exe_internal(cpu, result, fileName, module);
+        if (result->ErrorCode == 0)
+        {
+            module->IsLoaded = 1;
+        }
     }
     return result;
+}
+CPU_SIZE_T cpu_loaddll(CPU* cpu, const char* fileName)
+{
+    ExeLoadResult loadResult;
+    ModuleInfo* moduleInfo = NULL;
+    load_win32_exe(cpu, &loadResult, fileName, &moduleInfo);
+    if (moduleInfo != NULL)
+    {
+        return (CPU_SIZE_T)moduleInfo->VirtualAddress;
+    }
+    return 0;
 }
 
 ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const char* fileName, ModuleInfo* moduleInfo)
 {
-    // TODO: Check our logic is correct of validation of virtual addresses / sizes before accessing memory at those addresses.
-    //       Also seperate out the validation logic to another function to make things a little clearer?
-
     // Error codes (LPE = load portable executable)
     enum
     {
+        LPE_NONE,
         LPE_LOAD_FILE_FAILED,
         LPE_READ_IMAGE_DOS_HEADER_FAILED,
         LPE_UNSUPPORTED_IMAGE_DOS_HEADER_SIGNATURE,
@@ -125,7 +162,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
         LPE_BAD_IMAGE_IMPORT_BY_NAME
     };
     
-    int32_t isMainModule = moduleInfo == &cpu->MainModule;
+    int32_t isMainModule = moduleInfo == cpu->MainModule;
 
     memset(result, 0, sizeof(ExeLoadResult));
 
@@ -390,9 +427,6 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     {
         // Initialize the API imports (dll functions used by the target binary, which we need to provide implementations for)
         cpu_init_imports(cpu);
-        
-        // Initialize the map for API exports defined in internal modules
-        map_init(&cpu->ModuleExportsMap);
     }
 
     // Handle dll exports
@@ -444,7 +478,8 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                     return close_win32_exe(result, file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_ADDRESS);
                 }
                 
-                char targetFuncName[MAX_FUNC_NAME_LEN] = {0};
+                char targetFuncName[MAX_FUNC_NAME_LEN];
+                targetFuncName[0] = 0;
                 int32_t isExternalApiFunc = 0;
                 if (strlen(exportName) > 8 && strncmp(exportName, "wc86dll_", 8) == 0)
                 {
@@ -479,36 +514,19 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     else
     {
         // There isn't an export table, but we still want to get the name of the module (without file path info).
-        const char* fileNameWithoutPath = fileName;
-        const char* c = fileName;
-        while (*c != '\0')
-        {
-            if ((*c == '\\' || *c == '/'))
-            {
-                fileNameWithoutPath = c + 1;
-            }
-            c++;
-        }
-        if (*fileNameWithoutPath == '\0')
-        {
-            fileNameWithoutPath = fileName;
-        }
-        strcpy(moduleInfo->Name, fileNameWithoutPath);
+        strcpy(moduleInfo->Name, path_to_short_path(fileName));
     }
     
-    if (isMainModule)
+    // Add the module to modules collection
     {
-        // Load the clib / user lib.
-        // TODO: Support loading arbitary dlls (compiled by TCC)
-        
-        // TODO: Lookup of dlls in various locations
-        
-        ExeLoadResult dllLoadResult;
-        load_win32_exe(cpu, &dllLoadResult, "CLib.dll", &cpu->CLibModule);
-        load_win32_exe(cpu, &dllLoadResult, "UserLib.dll", &cpu->UserLibModule);
+        char moduleNameToLower[MAX_MODULE_NAME_LEN];
+        strcpylower(moduleNameToLower, moduleInfo->Name);
+        map_set(&cpu->Modules, moduleNameToLower, moduleInfo);
     }
     
     // Handle dll imports
+    map_int_t modulesToLoad;
+    map_init(&modulesToLoad);
     IMAGE_DATA_DIRECTORY importDescriptorDataDir = ntHeader.OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
     if (importDescriptorDataDir.VirtualAddress > 0 && importDescriptorDataDir.Size > 0)
     {
@@ -547,6 +565,16 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
             }
             else
             {
+                // Add the module name to the list of modules to load
+                char importDllNameToLower[MAX_MODULE_NAME_LEN];
+                strcpylower(importDllNameToLower, importDllName);
+                int* importDllLoadState = map_get(&modulesToLoad, importDllNameToLower);
+                if (importDllLoadState == NULL)
+                {
+                    // The value doesn't matter, we are just using it as a hashset
+                    map_set(&modulesToLoad, importDllNameToLower, 0);
+                }
+                
                 // NOTE: The following currently assumes that BOTH FirstThunk and OriginalFirstThunk are assigned in the file.
                 // These are really IMAGE_THUNK_DATA*
                 DWORD firstThunk = importDescriptor->FirstThunk;
@@ -571,7 +599,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                     (size_t)thunkData + sizeof(DWORD) < (size_t)moduleMemoryEnd &&
                     *originalThunkData != 0)
                 {
-                    // Reset the internal import name to just the dll name (no extension)
+                    // For each func reset the internal import name to just the dll name (no extension)
                     mappedImportName[mappedImportNameDllIndex] = '\0';
                     
                     if (*originalThunkData & IMAGE_ORDINAL_FLAG32)
@@ -606,16 +634,21 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                         }
                         else
                         {
-                            ImportInfo* import = cpu_find_import(cpu, importDllName, importName);
-                            if (import == NULL)
-                            {
-                                import = cpu->UnhandledFunctionImport;
-                                printf("Unresolved import %s %s\n", importDllName, importName);
-                            }
-                            else
+                            ImportInfo* import = cpu_find_import(cpu, mappedImportName);
+                            if (import != NULL)
                             {
                                 import->ThunkAddress = (uint32_t)cpu_get_virtual_address(cpu, thunkData);
                                 printf("Resolved import %s %s\n", importDllName, importName);
+                            }
+                            else
+                            {
+                                import = cpu->UnhandledFunctionImport;
+                                printf("Unresolved import %s %s\n", importDllName, importName);
+                                
+                                // Add the unresolved import to a map so we can look it up if it gets called
+                                char thunkAddressStr[12];
+                                sprintf(thunkAddressStr, "%u", cpu_get_virtual_address(cpu, thunkData));
+                                map_set(&cpu->UnresolvedImportNames, thunkAddressStr, (char*)importByName->Name);
                             }
                             *thunkData = (DWORD)cpu_get_virtual_address(cpu, import);
                         }
@@ -627,6 +660,28 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
             }
             importDescriptor++;
         }
+    }
+    
+    while (1)
+    {
+        map_iter_t iter = map_iter(modulesToLoad);
+        const char* key = map_next(&modulesToLoad, &iter);
+        if (key == NULL)
+        {
+            break;
+        }
+        ModuleInfo** existingModule = map_get(&cpu->Modules, key);
+        if (existingModule == NULL)
+        {
+            ExeLoadResult dllLoadResult;
+            ModuleInfo* dllModuleInfo;
+            load_win32_exe(cpu, &dllLoadResult, key, &dllModuleInfo);
+            if (dllModuleInfo != NULL)
+            {
+                map_set(&cpu->Modules, key, dllModuleInfo);
+            }
+        }
+        map_remove(&modulesToLoad, key);
     }
 
     // Now that the exe is loaded into memory we need to initialize some of the following things
@@ -652,10 +707,10 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
 
 int main()
 {
-    const char* fileName = "main2.exe";//"C:\\main.exe";
+    const char* fileName = "main_file_tests.exe";//"C:\\main.exe";
     
     CPU cpu;
-    memset(&cpu, 0, sizeof(CPU));
+    cpu_init(&cpu);
     
     const size_t heapSize = 0x1000000;// 16MB - Heap size (the stack size gets added to this to produce the final memory size)
     const size_t stackSize  = 0x100000;// 1MB - Total number of bytes in the stack
@@ -681,10 +736,10 @@ int main()
     
     printf("EOP: 0x%08X\n", loadResult.VirtualAddressOfEntryPoint);
     
-    cpu_init(&cpu, (uint32_t)loadResult.VirtualAddress, (uint32_t)loadResult.VirtualAddressOfEntryPoint, (uint32_t)loadResult.ImageSize, (uint32_t)heapSize, (uint32_t)stackSize);
+    cpu_init_state(&cpu, (uint32_t)loadResult.VirtualAddress, (uint32_t)loadResult.VirtualAddressOfEntryPoint, (uint32_t)loadResult.ImageSize, (uint32_t)heapSize, (uint32_t)stackSize);
     if (cpu.ErrorCode != 0)
     {
-        printf("cpu_init failed.\n");
+        printf("cpu_init_state failed.\n");
         cpu_destroy(&cpu);
         getchar();
         return 2;

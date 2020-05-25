@@ -1,9 +1,0 @@
-LIBRARY CLib.dll
-
-EXPORTS
-wc86dll_kernel32_GetProcAddress
-wc86dll_msvcrt_fputs
-wc86dll_msvcrt_memcpy
-wc86dll_msvcrt_memmove
-wc86dll_msvcrt_strcpy
-wc86dll_msvcrt_strlen

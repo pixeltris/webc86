@@ -1,1 +1,0 @@
-"..\..\..\webc86_archive\wctests\tcc\tcc.exe" -shared -o msvcrt.dll string/strlen.c

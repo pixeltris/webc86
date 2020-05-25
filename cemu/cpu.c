@@ -2,9 +2,19 @@
 #include "memmgr.h"
 #include <stdarg.h>
 
-int32_t cpu_first_init = 1;
+static int32_t cpu_first_init = 1;
 
-void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, uint32_t imageSize, uint32_t heapSize, uint32_t stackSize)
+void cpu_init(CPU* cpu)
+{
+    memset(cpu, 0, sizeof(*cpu));
+    
+    handles_init(&cpu->FileHandles);
+    handles_init(&cpu->DirHandles);
+    handles_init(&cpu->SocketHandles);
+    handles_init(&cpu->ThreadHandles);
+}
+
+void cpu_init_state(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, uint32_t imageSize, uint32_t heapSize, uint32_t stackSize)
 {
     if (cpu_first_init)
     {
@@ -42,6 +52,8 @@ void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, u
     cpu->EIP = cpu->VirtualEntryPointAddress;
     cpu->Reg[REG_ESP] = cpu->VirtualMemoryStackEndAddress;
     
+    fpu_init(cpu);
+    
     cpu_allocate_data_imports(cpu);
 }
 
@@ -49,6 +61,14 @@ void cpu_destroy(CPU* cpu)
 {
     memmgr_destroy(&cpu->Memory);
     map_deinit(&cpu->ModuleExportsMap);
+    map_deinit(&cpu->ImportsByName);
+    map_free_values_and_deinit(&cpu->Modules);// Free loaded module infos memory
+    map_deinit(&cpu->UnresolvedImportNames);
+    
+    handles_destroy(&cpu->FileHandles);
+    handles_destroy(&cpu->DirHandles);
+    handles_destroy(&cpu->SocketHandles);
+    handles_destroy(&cpu->ThreadHandles);
 }
 
 void cpu_onerror(CPU* cpu, char* error, ...)
@@ -403,7 +423,7 @@ uint32_t cpu_get_virtual_address(CPU* cpu, const void* realAddress)
     return memmgr_get_virtual_address(&cpu->Memory, (size_t)realAddress);
 }
 
-size_t cpu_get_real_address(CPU* cpu, uint32_t virtualAddress)
+void* cpu_get_real_address(CPU* cpu, uint32_t virtualAddress)
 {
     return memmgr_get_real_address(&cpu->Memory, virtualAddress);
 }
@@ -537,6 +557,20 @@ uint64_t cpu_fetchU64(CPU* cpu)
     return value;
 }
 
+float cpu_fetchF32(CPU* cpu)
+{
+    float value = cpu_readF32(cpu, cpu->EIP);
+    cpu->EIP += 4;
+    return value;
+}
+
+double cpu_fetchF64(CPU* cpu)
+{
+    float value = cpu_readF64(cpu, cpu->EIP);
+    cpu->EIP += 8;
+    return value;
+}
+
 int8_t cpu_readI8(CPU* cpu, uint32_t address)
 {
     int8_t* ptr = (int8_t*)cpu_get_real_address(cpu, address);
@@ -585,6 +619,18 @@ uint64_t cpu_readU64(CPU* cpu, uint32_t address)
     return *ptr;
 }
 
+float cpu_readF32(CPU* cpu, uint32_t address)
+{
+    float* ptr = (float*)cpu_get_real_address(cpu, address);
+    return *ptr;
+}
+
+double cpu_readF64(CPU* cpu, uint32_t address)
+{
+    double* ptr = (double*)cpu_get_real_address(cpu, address);
+    return *ptr;
+}
+
 void cpu_writeI8(CPU* cpu, uint32_t address, int8_t value)
 {
     int8_t* ptr = (int8_t*)cpu_get_real_address(cpu, address);
@@ -630,6 +676,18 @@ void cpu_writeU32(CPU* cpu, uint32_t address, uint32_t value)
 void cpu_writeU64(CPU* cpu, uint32_t address, uint64_t value)
 {
     uint64_t* ptr = (uint64_t*)cpu_get_real_address(cpu, address);
+    *ptr = value;
+}
+
+void cpu_writeF32(CPU* cpu, uint32_t address, float value)
+{
+    float* ptr = (float*)cpu_get_real_address(cpu, address);
+    *ptr = value;
+}
+
+void cpu_writeF64(CPU* cpu, uint32_t address, double value)
+{
+    double* ptr = (double*)cpu_get_real_address(cpu, address);
     *ptr = value;
 }
 

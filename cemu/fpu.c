@@ -25,6 +25,12 @@
 
 #define TWO_POW_63 0x8000000000000000ULL
 
+void fpu_init(CPU* cpu)
+{
+    cpu->Fpu.StackEmpty = 0xFF;
+    cpu->Fpu.ControlWord = 0x37F;
+}
+
 int32_t fpu_load_status_word(CPU* cpu)
 {
     return cpu->Fpu.StatusWord & ~(7 << 11) | cpu->Fpu.StackPtr;
@@ -116,12 +122,14 @@ void fpu_store_m80(CPU* cpu, uint32_t addr, long double n)
 double fpu_load_m64(CPU* cpu, uint32_t addr)
 {
     int64_t m64 = cpu_readI64(cpu, addr);
-    return *(double*)&m64;
+    cpu->Fpu.Float64 = *(double*)&m64;
+    return cpu->Fpu.Float64;
 }
 
 void fpu_store_m64(CPU* cpu, uint32_t addr, double i)
 {
-    cpu_writeI64(cpu, addr, *(int64_t*)&i);
+    cpu->Fpu.Float64 = fpu_get_sti(cpu, i);
+    cpu_writeI64(cpu, addr, *(int64_t*)&cpu->Fpu.Float64);
 }
 
 void fpu_fcom(CPU* cpu, long double y)

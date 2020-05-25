@@ -120,7 +120,7 @@ int memmgr_is_initialized(MemMgr* memMgr);
 size_t memmgr_get_base_virtual_address(MemMgr* memMgr);
 void memmgr_set_base_virtual_address(MemMgr* memMgr, size_t baseVirtualAddress);
 size_t memmgr_get_virtual_address(MemMgr* memMgr, size_t realAddress);
-size_t memmgr_get_real_address(MemMgr* memMgr, size_t virtualAddress);
+void* memmgr_get_real_address(MemMgr* memMgr, size_t virtualAddress);
 
 size_t memmgr_get_size(MemMgr* memMgr);
 size_t memmgr_get_free_size(MemMgr* memMgr);

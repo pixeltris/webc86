@@ -6,10 +6,18 @@
 #include <setjmp.h>
 #include <stdio.h>
 #include "memmgr.h"
-#include "image.h"
-#include "map.h"
+#include "collections.h"
+
+#define PLATFORM_WINDOWS 1
+#define PLATFORM_WEB 0
+#define PLATFORM_NDS 0
+#define PLATFORM_N3DS 0
+#define PLATFORM_PSP 0
+#define PLATFORM_PSVITA 0
 
 #define CPU_WITH_DEBUG 1
+
+typedef uint32_t CPU_SIZE_T;
 
 #define OPSIZE_8 7
 #define OPSIZE_16 15
@@ -63,6 +71,30 @@
 #define MAX_MODULE_NAME_LEN 260
 #define MAX_FUNC_NAME_LEN 4096
 
+// Helpers for manually implemented function imports
+// Note: CPU_STACK_END is only required for stdcall / fastcall (to clean up the stack)
+#define CPU_STACK_RETURN(cpu, x) cpu->Reg[REG_EAX] = (int32_t)x
+#define CPU_STACK_RETURN_I64(cpu, x) cpu->Reg[REG_EAX] = (int32_t)x; cpu->Reg[REG_EDX] = (int32_t)(x >> 0x1F)
+#define CPU_STACK_BEGIN(cpu) int32_t cpu##funcStackOffset = 0
+#define CPU_STACK_END(cpu) cpu_adjust_stack_reg(cpu, cpu##funcStackOffset)
+#define CPU_STACK_RESET(cpu) cpu##funcStackOffset = 0
+#define CPU_STACK_OFFSET(cpu) cpu##funcStackOffset
+#define CPU_STACK_GOTO(cpu, x) cpu##funcStackOffset = x
+#define CPU_STACK_POP_PTR(cpu) (void*)cpu_get_real_address(cpu, cpu_readU32(cpu, cpu_get_esp(cpu, cpu##funcStackOffset))); cpu##funcStackOffset += 4
+#define CPU_STACK_POP_PTR_CONST(cpu) (const void*)cpu_get_real_address(cpu, cpu_readU32(cpu, cpu_get_esp(cpu, cpu##funcStackOffset))); cpu##funcStackOffset += 4
+#define CPU_STACK_POP_SIZE_T(cpu) (CPU_SIZE_T)cpu_readU32(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 4
+#define CPU_STACK_POP_U8(cpu) cpu_readU8(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 1
+#define CPU_STACK_POP_I8(cpu) cpu_readI8(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 1
+#define CPU_STACK_POP_U16(cpu) cpu_readU16(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 2
+#define CPU_STACK_POP_I16(cpu) cpu_readI16(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 2
+#define CPU_STACK_POP_U32(cpu) cpu_readU32(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 4
+#define CPU_STACK_POP_I32(cpu) cpu_readI32(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 4
+#define CPU_STACK_POP_U64(cpu) cpu_readU64(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 8
+#define CPU_STACK_POP_I64(cpu) cpu_readI64(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 8
+#define CPU_STACK_POP_F32(cpu) cpu_readF32(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 4
+#define CPU_STACK_POP_F64(cpu) cpu_readF64(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 8
+#define CPU_STACK_POP_STRUCT(cpu, target) for (int32_t popStructOffset = 0; popStructOffset < sizeof(*target); popStructOffset++) { ((uint8_t*)target)[popStructOffset] = cpu_readU8(cpu, cpu_get_esp(cpu, cpu##funcStackOffset)); cpu##funcStackOffset += 1; }
+
 typedef struct tCPU CPU;
 
 typedef void(*FuncImportCallbackSig)(CPU* cpu);
@@ -78,14 +110,17 @@ typedef struct
     uint32_t ThunkAddress;
 } ImportInfo;
 
+typedef map_t(ImportInfo*) map_ImportInfo_t;
+
 typedef struct
 {
     int32_t IsLoaded;
     uint32_t VirtualAddress;// The virtual address of the loaded module
     uint32_t VirtualAddressOfEntryPoint;// Virtual address of the first instruction to execute
     uint32_t ImageSize;// ntHeader.OptionalHeader.SizeOfImage
-    char Name[MAX_MODULE_NAME_LEN];
+    char Name[MAX_MODULE_NAME_LEN];// Includes the dll extension
 } ModuleInfo;
+typedef map_t(ModuleInfo*) map_ModuleInfo_t;
 
 typedef union
 {
@@ -107,6 +142,34 @@ typedef struct
     double Float64;
 } FPU;
 
+typedef struct
+{
+    // The following is copied from CPU. When switching 'threads', we swap these with CPU.
+    // Note: This way of implementing threads means we can't use real threading.
+    //       To use real threading things would need to be refactored to pass around CPUContext instead of CPU (and hold a CPU* reference here).
+    FPU Fpu;
+    
+    uint32_t EIP;
+    
+    int32_t Prefixes;
+    int32_t Flags;
+    int32_t FlagsChanged;
+    int32_t LastOp1;
+    int32_t LastOp2;
+    int32_t LastOpSize;
+    int32_t LastAddResult;
+    int32_t LastResult;
+    uint8_t ModRM;
+    uint32_t TempAddr;
+    int32_t Reg[8];
+    
+    jmp_buf JmpBuf;
+    int32_t JmpBufInitialized;
+    
+    int32_t Complete;
+    int32_t ErrorCode;
+} CPUContext;
+
 struct tCPU
 {
     // NOTE: There is slightly less heap than allocated due to the headers on each block in MemMgr
@@ -124,22 +187,29 @@ struct tCPU
     
     MemMgr Memory;
 
-    ModuleInfo MainModule;// Exe module
-    ModuleInfo CLibModule;// C lib dll
-    ModuleInfo UserLibModule;// User lib dll
+    ModuleInfo* MainModule;// Exe module
+    map_ModuleInfo_t Modules;// NOTE: Modules may be in here but not loaded. Also includes the main exe module as well.
     
-    // Map from module+function name to target function address. This is used for CLibModule/UserLibModule where API
-    // functions usually defined in external DLLs (such as kernel32.dll) are actually defined in one of our modules.
+    // Map "DllName_FuncName" to target function address. This is used for functions in actual dlls (as opposed to imports defined manually in the emulator)
     map_uint32_t ModuleExportsMap;
     
     int32_t NumImports;
+    map_ImportInfo_t ImportsByName;// Imports with hash map lookup ("DllName_FuncName" e.g. "msvcrt_fopen")
     ImportInfo* Imports;// Allocated into a single block of memory
     ImportInfo* UnhandledFunctionImport;// The fallback import handler
     uint32_t ImportsBeginAddress;// The address of where the imports start (virtul address)
     uint32_t ImportsEndAddress;// The address of where the imports end (virtul address) (ImportsBeginAddress + imports buffer size)
-
-    // Imports we need references to (this is mostly for data imports)
-    ImportInfo* Import_IOB;
+    map_str_t UnresolvedImportNames;// Address -> name
+    
+    HandleCollection FileHandles;// fopen / fclose
+    HandleCollection DirHandles;// opendir / closedir
+    HandleCollection SocketHandles;
+    HandleCollection ThreadHandles;
+    
+    uint32_t AtExitFuncPtr;// For atexit()
+    // These should be per thread...
+    uint32_t Statics_tmpname;// char* size L_tmpnam
+    uint32_t Statics_inet_ntoa;// char* size 16
     
     FPU Fpu;
     
@@ -169,9 +239,14 @@ void cpu_allocate_data_imports(CPU* cpu);
 ImportInfo* cpu_define_import_ex(CPU* cpu, int32_t* counter, const char* dllName, const char* name, FuncImportCallbackSig function, uint32_t dataSize);
 ImportInfo* cpu_define_import(CPU* cpu, int32_t* counter, const char* dllName, const char* name, FuncImportCallbackSig function);
 ImportInfo* cpu_define_data_import(CPU* cpu, int32_t* counter, const char* dllName, const char* name, uint32_t dataSize);
-ImportInfo* cpu_find_import(CPU* cpu, const char* dllName, const char* name);
+ImportInfo* cpu_find_import(CPU* cpu, const char* fullFuncName);
+void import_unresolved(CPU* cpu);
+void import_ignore(CPU* cpu);
 
-void cpu_init(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, uint32_t imageSize, uint32_t heapSize, uint32_t stackSize);
+CPU_SIZE_T cpu_loaddll(CPU* cpu, const char* fileName);
+
+void cpu_init(CPU* cpu);
+void cpu_init_state(CPU* cpu, uint32_t virtualAddress, uint32_t addressOfEntryPoint, uint32_t imageSize, uint32_t heapSize, uint32_t stackSize);
 void cpu_destroy(CPU* cpu);
 void cpu_onerror(CPU* cpu, char* error, ...);
 #if CPU_WITH_DEBUG
@@ -179,6 +254,12 @@ void cpu_dbg_assert(CPU* cpu, int32_t cond, char* msg);
 #else
 #define cpu_dbg_assert(cpu, cond, msg)
 #endif
+
+void cpu_set_command_line_args(CPU* cpu, char** args, int nargs);
+void cpu_add_command_line_arg(CPU* cpu, char* arg);
+void cpu_add_command_line_args(CPU* cpu, char** args, int nargs);
+int32_t cpu_get_command_line_arg_count(CPU* cpu);
+char* cpu_get_command_line_arg(CPU* cpu, int32_t index, char* str, int strLen);
 
 void cpu_print_callstack(CPU* cpu, int32_t maxFrames);
 void cpu_check_stack_memory(CPU* cpu);
@@ -229,7 +310,7 @@ void cpu_trigger_ud(CPU* cpu);
 
 int32_t cpu_is_valid_address(CPU* cpu, uint32_t addr, int32_t size);
 uint32_t cpu_get_virtual_address(CPU* cpu, const void* realAddress);
-size_t cpu_get_real_address(CPU* cpu, uint32_t virtualAddress);
+void* cpu_get_real_address(CPU* cpu, uint32_t virtualAddress);
 void cpu_validate_virtual_address(CPU* cpu, uint32_t virtualAddress);
 void cpu_validate_real_address(CPU* cpu, const void* realAddress);
 
@@ -256,6 +337,8 @@ uint8_t cpu_fetchU8(CPU* cpu);
 uint16_t cpu_fetchU16(CPU* cpu);
 uint32_t cpu_fetchU32(CPU* cpu);
 uint64_t cpu_fetchU64(CPU* cpu);
+float cpu_fetchF32(CPU* cpu);
+double cpu_fetchF64(CPU* cpu);
 
 int8_t cpu_readI8(CPU* cpu, uint32_t address);
 int16_t cpu_readI16(CPU* cpu, uint32_t address);
@@ -265,6 +348,8 @@ uint8_t cpu_readU8(CPU* cpu, uint32_t address);
 uint16_t cpu_readU16(CPU* cpu, uint32_t address);
 uint32_t cpu_readU32(CPU* cpu, uint32_t address);
 uint64_t cpu_readU64(CPU* cpu, uint32_t address);
+float cpu_readF32(CPU* cpu, uint32_t address);
+double cpu_readF64(CPU* cpu, uint32_t address);
 
 void cpu_writeI8(CPU* cpu, uint32_t address, int8_t value);
 void cpu_writeI16(CPU* cpu, uint32_t address, int16_t value);
@@ -274,6 +359,8 @@ void cpu_writeU8(CPU* cpu, uint32_t address, uint8_t value);
 void cpu_writeU16(CPU* cpu, uint32_t address, uint16_t value);
 void cpu_writeU32(CPU* cpu, uint32_t address, uint32_t value);
 void cpu_writeU64(CPU* cpu, uint32_t address, uint64_t value);
+void cpu_writeF32(CPU* cpu, uint32_t address, float value);
+void cpu_writeF64(CPU* cpu, uint32_t address, double value);
 
 int32_t cpu_read_moffs(CPU* cpu);
 
@@ -421,6 +508,11 @@ void cpu_init_int_log2_table();
 uint16_t cpu_bsr16(CPU* cpu, uint16_t old, uint16_t bit_base);
 uint32_t cpu_bsr32(CPU* cpu, uint32_t old, uint32_t bit_base);
 
+void fpu_init(CPU* cpu);
+void fpu_push(CPU* cpu, long double x);
+long double fpu_get_sti(CPU* cpu, int32_t i);
+long double fpu_get_st0(CPU* cpu);
+float fpu_load_m32(CPU* cpu, uint32_t addr);
 int32_t fpu_op_D8_reg(CPU* cpu, uint8_t imm8);
 int32_t fpu_op_D8_mem(CPU* cpu, uint8_t imm8, uint32_t addr);
 int32_t fpu_op_D9_reg(CPU* cpu, uint8_t imm8);
