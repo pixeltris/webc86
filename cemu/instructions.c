@@ -277,6 +277,8 @@ void cpu_execute_instruction_t16(CPU* cpu)
     uint16_t tempU16;
     uint32_t tempU32;
     
+    //printf("OP %02X %08X\n", cpu_readU8(cpu, cpu->EIP), cpu->EIP);
+    
     uint8_t opcode = cpu_fetchU8(cpu);
     switch (opcode)
     {
@@ -577,6 +579,8 @@ void cpu_execute_instruction_t32(CPU* cpu)
 {
     int32_t tempI32, tempI32_2, tempI32_3;
     uint32_t tempU32;
+    
+    //printf("OP %02X %08X\n", cpu_readU8(cpu, cpu->EIP), cpu->EIP);
     
     uint8_t opcode = cpu_fetchU8(cpu);
     switch (opcode)

@@ -70,6 +70,7 @@ typedef uint32_t CPU_SIZE_T;
 
 #define MAX_MODULE_NAME_LEN 260
 #define MAX_FUNC_NAME_LEN 4096
+#define MAX_PATH_LEN 4096
 
 // Helpers for manually implemented function imports
 // Note: CPU_STACK_END is only required for stdcall / fastcall (to clean up the stack)
@@ -119,6 +120,7 @@ typedef struct
     uint32_t VirtualAddressOfEntryPoint;// Virtual address of the first instruction to execute
     uint32_t ImageSize;// ntHeader.OptionalHeader.SizeOfImage
     char Name[MAX_MODULE_NAME_LEN];// Includes the dll extension
+    char Path[MAX_PATH_LEN];// Full path of the dll on disk
 } ModuleInfo;
 typedef map_t(ModuleInfo*) map_ModuleInfo_t;
 

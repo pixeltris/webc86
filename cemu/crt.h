@@ -10,6 +10,11 @@
 // TODO: scanf %p (and possibly other specifiers) will write 8 bytes on x64 platforms. This needs to be 4 bytes.
 //       To fix this we need to pre-process the fmt arg and find which args are 8 bytes on x64 and 4 bytes on x86. Then remap them.
 // TODO: socket structs probably need to be converted (likely size differences on x64) - especially select(). also constants differences (socket options, etc) - see wine ws2_32/socket.c
+// TODO: threading
+// TODO: signals
+// TODO: pipes?
+// TODO: scanf?
+// TODO: qsort / bsearch
 
 void crt_init_imports(CPU* cpu, int32_t* counter);
 void crt_allocate_data_imports(CPU* cpu);
@@ -285,10 +290,13 @@ void crt_strcpy(CPU* cpu);
 void crt_strcspn(CPU* cpu);
 void crt__strdup(CPU* cpu);// strdup
 void crt_strerror(CPU* cpu);
+void crt__stricmp(CPU* cpu);
 void crt_strlen(CPU* cpu);
+void crt__strlwr(CPU* cpu);
 void crt_strncat(CPU* cpu);
 void crt_strncmp(CPU* cpu);
 void crt_strncpy(CPU* cpu);
+void crt__strnicmp(CPU* cpu);
 void crt_strnlen(CPU* cpu);
 void crt_strpbrk(CPU* cpu);
 void crt_strrchr(CPU* cpu);
@@ -324,6 +332,13 @@ void crt_towupper(CPU* cpu);
 void crt_towlower(CPU* cpu);
 void crt_iswctype(CPU* cpu);
 void crt_is_wctype(CPU* cpu);
+
+/////////////////////////////////
+// kernel32.dll
+/////////////////////////////////
+
+void crt_GetModuleFileNameA(CPU* cpu);
+void crt_GetSystemDirectoryA(CPU* cpu);
 
 /////////////////////////////////
 // winsock.h

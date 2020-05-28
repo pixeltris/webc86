@@ -123,7 +123,8 @@ void* memmgr_realloc(MemMgr* memMgr, void* ptr, size_t size)
 	mem_header_t* block = ((mem_header_t*)ptr) - 1;
 
 	// the block is already big enough, no change required
-	if (block->s.size >= size)
+	size_t currentSize = (block->s.size - 1) * sizeof(mem_header_t);
+	if (currentSize >= size)
 	{
 		return ptr;
 	}
@@ -134,7 +135,7 @@ void* memmgr_realloc(MemMgr* memMgr, void* ptr, size_t size)
 	{
 		return NULL;
 	}
-	memcpy(newPtr, ptr, block->s.size);
+	memcpy(newPtr, ptr, currentSize);
 	memmgr_free(memMgr, ptr);
 	return newPtr;
 }

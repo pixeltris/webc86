@@ -35,6 +35,7 @@ void import_unresolved(CPU* cpu)
     {
         printf("[WARNING] Unresolved dll import called. ret: 0x%08X\n", cpu->EIP);
     }
+    CPU_STACK_RETURN(cpu, 0);
 }
 
 void import_ignore(CPU* cpu)

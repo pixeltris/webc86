@@ -21,10 +21,11 @@
 #endif
 
 #define MSVCRT_DLL "msvcrt"
+#define KERNEL32_DLL "kernel32"
 #define WS2_32_DLL "ws2_32"
 
-#define ARGC_STR "___argc"
-#define ARGV_STR "___argv"
+#define ARGC_STR "__argc"
+#define ARGV_STR "__argv"
 
 #define SIZEOF_FILE 32
 #define IOB_NUM 20
@@ -101,9 +102,9 @@ void cpu_add_command_line_arg(CPU* cpu, char* arg)
         {
             argCopy[0] = '\0';
         }
-        cpu_writeU32(cpu, argsPtr + (currentNumArgs * sizeof(CPU_SIZE_T)), cpu_get_virtual_address(cpu, argCopy));
-        cpu_writeI32(cpu, importArgC->DataAddress, currentNumArgs + 1);
     }
+    cpu_writeU32(cpu, argsPtr + (currentNumArgs * sizeof(CPU_SIZE_T)), cpu_get_virtual_address(cpu, argCopy));
+    cpu_writeI32(cpu, importArgC->DataAddress, currentNumArgs + 1);
 }
 
 void cpu_add_command_line_args(CPU* cpu, char** args, int nargs)
@@ -367,6 +368,7 @@ void crt_init_imports(CPU* cpu, int32_t* counter)
     cpu_define_import(cpu, counter, MSVCRT_DLL, "vfprintf", crt_vfprintf);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "vprintf", crt_vprintf);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "vsnprintf", crt_vsnprintf);
+    cpu_define_import(cpu, counter, MSVCRT_DLL, "_vsnprintf", crt_vsnprintf);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "vsprintf", crt_vsprintf);
     
     /////////////////////////////////
@@ -387,7 +389,7 @@ void crt_init_imports(CPU* cpu, int32_t* counter)
     cpu_define_import(cpu, counter, MSVCRT_DLL, "exit", crt_exit);
     //cpu_define_import(cpu, counter, MSVCRT_DLL, "_fcvt", crt__fcvt);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "free", crt_free);
-    //cpu_define_import(cpu, counter, MSVCRT_DLL, "gcvt", crt__gcvt);
+    cpu_define_import(cpu, counter, MSVCRT_DLL, "gcvt", crt__gcvt);
     //cpu_define_import(cpu, counter, MSVCRT_DLL, "getenv", crt_getenv);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "_itoa", crt__itoa);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "labs", crt_labs);
@@ -428,10 +430,13 @@ void crt_init_imports(CPU* cpu, int32_t* counter)
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strcspn", crt_strcspn);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "_strdup", crt__strdup);
     //cpu_define_import(cpu, counter, MSVCRT_DLL, "strerror", crt_strerror);
+    cpu_define_import(cpu, counter, MSVCRT_DLL, "_stricmp", crt__stricmp);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strlen", crt_strlen);
+    cpu_define_import(cpu, counter, MSVCRT_DLL, "_strlwr", crt__strlwr);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strncat", crt_strncat);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strncmp", crt_strncmp);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strncpy", crt_strncpy);
+    cpu_define_import(cpu, counter, MSVCRT_DLL, "_strnicmp", crt__strnicmp);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strnlen", crt_strnlen);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strpbrk", crt_strpbrk);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strrchr", crt_strrchr);
@@ -467,6 +472,13 @@ void crt_init_imports(CPU* cpu, int32_t* counter)
     cpu_define_import(cpu, counter, MSVCRT_DLL, "towlower", crt_towlower);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "iswctype", crt_iswctype);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "is_wctype", crt_is_wctype);
+    
+    /////////////////////////////////
+    // kernel32.dll
+    /////////////////////////////////
+    
+    cpu_define_import(cpu, counter, KERNEL32_DLL, "GetModuleFileNameA", crt_GetModuleFileNameA);
+    cpu_define_import(cpu, counter, KERNEL32_DLL, "GetSystemDirectoryA", crt_GetSystemDirectoryA);
     
     /////////////////////////////////
     // winsock.h
@@ -1558,6 +1570,18 @@ FILE* get_file(CPU* cpu, uint32_t handleId)
     if (handleId != 0)
     {
         fileHandle = handles_find(&cpu->FileHandles, handleId);
+        if (fileHandle == NULL)
+        {
+            // iob FILE addresses are accessed directly, their handleId can be found at the start of the struct
+            ImportInfo* importIOB = cpu_find_import(cpu, MSVCRT_DLL"_""_iob");
+            if (importIOB != NULL &&
+                importIOB->DataAddress &&
+                handleId >= importIOB->DataAddress &&
+                handleId < importIOB->DataAddress + (SIZEOF_FILE * IOB_NUM))
+            {
+                return get_file(cpu, cpu_readU32(cpu, handleId));
+            }
+        }
     }
     return fileHandle;
 }
@@ -1662,11 +1686,12 @@ void printf_impl(CPU* cpu, FormatType type, FormatVa va)
             break;
     }
     fmt = CPU_STACK_POP_PTR_CONST(cpu);
-    size_t writtenBytes = 0;// Only used for FT_BufferLen (don't rely on it for anything else)
+    size_t writtenBytes = 0;
     
+    int32_t espStart = cpu->Reg[REG_ESP];
     if (va == FVA_Yes)
     {
-        cpu->Reg[REG_ESP] = cpu_pop32(cpu); 
+        cpu->Reg[REG_ESP] = CPU_STACK_POP_U32(cpu);
         CPU_STACK_RESET(cpu);
     }
 
@@ -1675,6 +1700,7 @@ void printf_impl(CPU* cpu, FormatType type, FormatVa va)
     char* tempBufferEx = NULL;
     size_t tempBufferExLen = 0;
     
+    const char* lazyPrintf = NULL;
     const char* ptr = fmt;
     while (*ptr && (bufferSize == -1 || writtenBytes < bufferSize))
     {
@@ -1690,10 +1716,15 @@ void printf_impl(CPU* cpu, FormatType type, FormatVa va)
             switch (type)
             {
                 case FT_Std:
-                    putchar(c);
+                    // using putchar(c) would be ideal, but it's quite slow when called many times
+                    if (lazyPrintf == NULL)
+                    {
+                        lazyPrintf = ptr - 1;
+                    }
                     break;
                 case FT_File:
                     fputc(c, stream);
+                    writtenBytes++;
                     break;
                 case FT_Buffer:
                 case FT_BufferLen:
@@ -1703,6 +1734,7 @@ void printf_impl(CPU* cpu, FormatType type, FormatVa va)
             }
             continue;
         }
+        const char* lazyPrintfFmtStart = ptr - 1;
         
         int32_t complete = 0;
         while (!complete)
@@ -1849,18 +1881,27 @@ void printf_impl(CPU* cpu, FormatType type, FormatVa va)
                 break;
         }
         
+        size_t len = strlen(targetTempBuffer);
         switch (type)
         {
             case FT_Std:
+                if (lazyPrintf != NULL)
+                {
+                    size_t lazyPrintfLen = lazyPrintfFmtStart - lazyPrintf;
+                    writtenBytes += lazyPrintfLen;
+                    printf("%.*s", lazyPrintfLen, lazyPrintf);
+                    lazyPrintf = NULL;
+                }
                 printf("%s", targetTempBuffer);
+                writtenBytes += len;
                 break;
             case FT_File:
                 fprintf(stream, "%s", targetTempBuffer);
+                writtenBytes += len;
                 break;
             case FT_Buffer:
             case FT_BufferLen:
                 {
-                    size_t len = strlen(targetTempBuffer);
                     if (len > 0)
                     {
                         if (bufferSize > 0 && writtenBytes + len > bufferSize)
@@ -1875,10 +1916,18 @@ void printf_impl(CPU* cpu, FormatType type, FormatVa va)
                 break;
         }
     }
+    if (lazyPrintf != NULL)
+    {
+        size_t lazyPrintfLen = ptr - lazyPrintf;
+        writtenBytes += lazyPrintfLen;
+        printf("%.*s", lazyPrintfLen, lazyPrintf);
+    }
     if (buffer != NULL)
     {
         *buffer = '\0';
     }
+    cpu->Reg[REG_ESP] = espStart;
+    CPU_STACK_RETURN(cpu, writtenBytes);
 }
 
 // This is a super lazy implementation (grabs pointers until it finds an invalid one, then passes the pointers to real functions)
@@ -2581,11 +2630,11 @@ void crt__gcvt(CPU* cpu)
     int32_t digits = CPU_STACK_POP_I32(cpu);
     char* buffer = CPU_STACK_POP_PTR(cpu);
 #if PLATFORM_WINDOWS
-    //result = _gcvt(value, count, dec, sign);
+    _gcvt(value, digits, buffer);
 #else
-    //result = gcvt(value, count, dec, sign);
+    gcvt(value, digits, buffer);
 #endif
-    // TODO
+    CPU_STACK_RETURN(cpu, cpu_get_virtual_address(cpu, buffer));
 }
 
 void crt_getenv(CPU* cpu)
@@ -2905,11 +2954,45 @@ void crt_strerror(CPU* cpu)
     // TODO
 }
 
+void crt__stricmp(CPU* cpu)
+{
+    CPU_STACK_BEGIN(cpu);
+    const unsigned char* str1 = CPU_STACK_POP_PTR_CONST(cpu);
+    const unsigned char* str2 = CPU_STACK_POP_PTR_CONST(cpu);
+    while (tolower(*str1) == tolower(*str2))
+    {
+        if (*str1 == '\0')
+        {
+            CPU_STACK_RETURN(cpu, 0);
+            return;
+        }
+        str1++;
+        str2++;
+    }
+    CPU_STACK_RETURN(cpu, tolower(*str1) - tolower(*str2));
+}
+
 void crt_strlen(CPU* cpu)
 {
     CPU_STACK_BEGIN(cpu);
     const char* str = CPU_STACK_POP_PTR_CONST(cpu);
     CPU_STACK_RETURN(cpu, strlen(str));
+}
+
+void crt__strlwr(CPU* cpu)
+{
+    CPU_STACK_BEGIN(cpu);
+    const char* str = CPU_STACK_POP_PTR_CONST(cpu);
+    if (str != NULL)
+    {
+        unsigned char *p = (unsigned char *)str;
+        while (*p)
+        {
+            *p = tolower((unsigned char)*p);
+            p++;
+        }
+    }
+    CPU_STACK_RETURN(cpu, cpu_get_virtual_address(cpu, str));
 }
 
 void crt_strncat(CPU* cpu)
@@ -2937,6 +3020,32 @@ void crt_strncpy(CPU* cpu)
     const char* src = CPU_STACK_POP_PTR_CONST(cpu);
     CPU_SIZE_T num = CPU_STACK_POP_SIZE_T(cpu);
     CPU_STACK_RETURN(cpu, cpu_get_virtual_address(cpu, strncpy(dest, src, num)));
+}
+
+void crt__strnicmp(CPU* cpu)
+{
+    CPU_STACK_BEGIN(cpu);
+    const unsigned char* str1 = CPU_STACK_POP_PTR_CONST(cpu);
+    const unsigned char* str2 = CPU_STACK_POP_PTR_CONST(cpu);
+    uint32_t count = CPU_STACK_POP_U32(cpu);
+    int32_t i = 0;
+    while (i < count && tolower(str1[i]) == tolower(str2[i]))
+    {
+        if (str1[i] == '\0')
+        {
+            CPU_STACK_RETURN(cpu, 0);
+            return;
+        }
+        i++;
+    }
+    if (i >= count)
+    {
+        CPU_STACK_RETURN(cpu, 0);
+    }
+    else
+    {
+        CPU_STACK_RETURN(cpu, tolower(*str1) - tolower(*str2));
+    }
 }
 
 void crt_strnlen(CPU* cpu)
@@ -3099,6 +3208,83 @@ void crt_iswctype(CPU* cpu)
 void crt_is_wctype(CPU* cpu)
 {
     crt_iswctype(cpu);
+}
+
+/////////////////////////////////
+// kernel32.dll (__stdcall)
+/////////////////////////////////
+
+void crt_GetModuleFileNameA(CPU* cpu)
+{
+    CPU_STACK_BEGIN(cpu);
+    CPU_SIZE_T hModule = CPU_STACK_POP_SIZE_T(cpu);
+    char* lpFilename = CPU_STACK_POP_PTR(cpu);
+    uint32_t nSize = CPU_STACK_POP_U32(cpu);
+    CPU_STACK_END(cpu);
+    
+    if (hModule == 0)
+    {
+        hModule = cpu->MainModule->VirtualAddress;
+    }
+    
+    uint32_t result = 0;
+    if (hModule != 0 && lpFilename != NULL)
+    {
+        const char* key;
+        map_iter_t iter = map_iter(cpu->Modules);
+        while ((key = map_next(&cpu->Modules, &iter)))
+        {
+            ModuleInfo** modulePtr = map_get(&cpu->Modules, key);
+            if (modulePtr != NULL)
+            {
+                ModuleInfo* moduleInfo = *modulePtr;
+                if (moduleInfo->VirtualAddress == hModule)
+                {
+                    for (uint32_t i = 0; i < nSize; i++)
+                    {
+                        lpFilename[i] = moduleInfo->Path[i];
+                        if (moduleInfo->Path[i] == '\0')
+                        {
+                            break;
+                        }
+                        result = i;
+                    }
+                    break;
+                }
+            }
+        }
+    }
+    CPU_STACK_RETURN(cpu, result);
+}
+
+void crt_GetSystemDirectoryA(CPU* cpu)
+{
+    CPU_STACK_BEGIN(cpu);
+    char* lpBuffer = CPU_STACK_POP_PTR(cpu);
+    uint32_t uSize = CPU_STACK_POP_U32(cpu);
+    CPU_STACK_END(cpu);
+    
+    // "C:/Windows/System32"
+#if PLATFORM_WINDOWS
+    CPU_STACK_RETURN(cpu, GetSystemDirectoryA(lpBuffer, uSize));
+#else
+    char* systemPath = "/";
+    if (lpBuffer != NULL)
+    {
+        size_t len = strlen(systemPath);
+        if (uSize < len)
+        {
+            len = uSize + 1;
+        }
+        strncpy(lpBuffer, systemPath, len);
+        lpBuffer[uSize] = '\0';
+        CPU_STACK_RETURN(cpu, len);
+    }
+    else
+    {
+        CPU_STACK_RETURN(cpu, 0);
+    }
+#endif
 }
 
 /////////////////////////////////
@@ -3494,6 +3680,8 @@ void crt_WSASetLastError(CPU* cpu)
     
 #if PLATFORM_WINDOWS
     WSASetLastError(iError);
+#else
+    errno = iError;
 #endif
 }
 
@@ -3502,6 +3690,6 @@ void crt_WSAGetLastError(CPU* cpu)
 #if PLATFORM_WINDOWS
     CPU_STACK_RETURN(cpu, WSAGetLastError());
 #else
-    CPU_STACK_RETURN(cpu, 0);
+    CPU_STACK_RETURN(cpu, errno);
 #endif
 }

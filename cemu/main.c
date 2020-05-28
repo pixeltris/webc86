@@ -53,31 +53,20 @@ int try_get_file_size(FILE* file, size_t* outFileSize)
 // (LPE = load portable executable)
 #define LPE_LOG(...) printf(__VA_ARGS__)
 
-typedef struct
+int close_win32_exe(FILE* file, int errorCode)
 {
-    int ErrorCode;
-    size_t Address;// The address of the exe (real address)
-    size_t AddressOfEntryPoint;// The address of the first instruction to execute (real address, only used for reference, use the virtual address)
-    DWORD VirtualAddress;// The virtual address of the loaded exe (should be ntHeader.OptionalHeader.ImageBase)
-    DWORD VirtualAddressOfEntryPoint;// Virtual address of the first instruction to execute
-    DWORD ImageSize;// ntHeader.OptionalHeader.SizeOfImage
-} ExeLoadResult;
-
-ExeLoadResult* close_win32_exe(ExeLoadResult* result, FILE* file, int errorCode)
-{
-    result->ErrorCode = errorCode;
     if (file)
     {
         if (fclose(file) != 0 && errorCode == 0)
         {
-            result->ErrorCode = -1;
+            return -1;
         }
     }
-    return result;
+    return errorCode;
 }
 
-ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const char* fileName, ModuleInfo* moduleInfo);
-ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* fileName, ModuleInfo** outModuleInfo)
+int load_win32_exe_internal(CPU* cpu, const char* fileName, ModuleInfo* moduleInfo);
+int load_win32_exe(CPU* cpu, const char* fileName, ModuleInfo** outModuleInfo)
 {
     // Check if the module is already loaded
     {
@@ -90,8 +79,7 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* fileN
             {
                 *outModuleInfo = NULL;
             }
-            result->ErrorCode = -3;
-            return result;
+            return -3;
         }
     }
     
@@ -102,23 +90,22 @@ ExeLoadResult* load_win32_exe(CPU* cpu, ExeLoadResult* result, const char* fileN
     }
     if (module == NULL)
     {
-        result->ErrorCode = -2;
+        return -2;
     }
     else
     {
-        load_win32_exe_internal(cpu, result, fileName, module);
-        if (result->ErrorCode == 0)
+        int errorCode = load_win32_exe_internal(cpu, fileName, module);
+        if (errorCode == 0)
         {
             module->IsLoaded = 1;
         }
+        return errorCode;
     }
-    return result;
 }
 CPU_SIZE_T cpu_loaddll(CPU* cpu, const char* fileName)
 {
-    ExeLoadResult loadResult;
     ModuleInfo* moduleInfo = NULL;
-    load_win32_exe(cpu, &loadResult, fileName, &moduleInfo);
+    load_win32_exe(cpu, fileName, &moduleInfo);
     if (moduleInfo != NULL)
     {
         return (CPU_SIZE_T)moduleInfo->VirtualAddress;
@@ -126,7 +113,7 @@ CPU_SIZE_T cpu_loaddll(CPU* cpu, const char* fileName)
     return 0;
 }
 
-ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const char* fileName, ModuleInfo* moduleInfo)
+int load_win32_exe_internal(CPU* cpu, const char* fileName, ModuleInfo* moduleInfo)
 {
     // Error codes (LPE = load portable executable)
     enum
@@ -164,16 +151,13 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     
     int32_t isMainModule = moduleInfo == cpu->MainModule;
 
-    memset(result, 0, sizeof(ExeLoadResult));
-
 #pragma warning(push)
 #pragma warning(disable:4996)// disable warning about using fopen instead of fopen_s
     FILE* file = fopen(fileName, "rb");
 #pragma warning(pop)
     if (file == NULL)
     {
-        result->ErrorCode = LPE_LOAD_FILE_FAILED;
-        return result;
+        return LPE_LOAD_FILE_FAILED;
     }
 
     IMAGE_DOS_HEADER dosHeader;
@@ -182,37 +166,37 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     if (fread(&dosHeader, sizeof(dosHeader), 1, file) != 1)
     {
         LPE_LOG("Failed to read IMAGE_DOS_HEADER\n");
-        return close_win32_exe(result, file, LPE_READ_IMAGE_DOS_HEADER_FAILED);
+        return close_win32_exe(file, LPE_READ_IMAGE_DOS_HEADER_FAILED);
     }
 
     if (dosHeader.e_magic != IMAGE_DOS_SIGNATURE)
     {
         LPE_LOG("Unsupported IMAGE_DOS_HEADER signature (%d)", dosHeader.e_magic);
-        return close_win32_exe(result, file, LPE_UNSUPPORTED_IMAGE_DOS_HEADER_SIGNATURE);
+        return close_win32_exe(file, LPE_UNSUPPORTED_IMAGE_DOS_HEADER_SIGNATURE);
     }
 
     if (try_file_seek(file, dosHeader.e_lfanew, SEEK_SET) != 0)
     {
         LPE_LOG("Bad e_lfanew offset (long file address for the new exe header (IMAGE_NT_HEADERS))\n");
-        return close_win32_exe(result, file, LPE_BAD_LFA_NEW_OFFSET);
+        return close_win32_exe(file, LPE_BAD_LFA_NEW_OFFSET);
     }
 
     if (fread(&ntHeader, sizeof(ntHeader), 1, file) != 1)
     {
         LPE_LOG("Failed to read IMAGE_NT_HEADERS\n");
-        return close_win32_exe(result, file, LPE_READ_IMAGE_NT_HEADER_FAILED);
+        return close_win32_exe(file, LPE_READ_IMAGE_NT_HEADER_FAILED);
     }
 
     if (ntHeader.Signature != IMAGE_NT_SIGNATURE)
     {
         LPE_LOG("Unsupported IMAGE_NT_HEADERS signature (%d)\n", ntHeader.Signature);
-        return close_win32_exe(result, file, LPE_UNSUPPORTED_IMAGE_NT_HEADER_SIGNATURE);
+        return close_win32_exe(file, LPE_UNSUPPORTED_IMAGE_NT_HEADER_SIGNATURE);
     }
 
     if (ntHeader.FileHeader.Machine != IMAGE_FILE_MACHINE_I386)
     {
         LPE_LOG("Only x86 executables are supported (%04hX)\n", ntHeader.FileHeader.Machine);
-        return close_win32_exe(result, file, LPE_UNSUPPORTED_ARCHITECTURE);
+        return close_win32_exe(file, LPE_UNSUPPORTED_ARCHITECTURE);
     }
 
     // Seek to the end of the IMAGE_OPTIONAL_HEADER
@@ -221,7 +205,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     if (try_file_seek(file, optionalHeaderEnd, SEEK_SET) != 0)
     {
         LPE_LOG("Failed to read IMAGE_OPTIONAL_HEADER\n");
-        return close_win32_exe(result, file, LPE_READ_IMAGE_OPTIONAL_HEADER_FAILED);
+        return close_win32_exe(file, LPE_READ_IMAGE_OPTIONAL_HEADER_FAILED);
     }
 
     // There is a hard limit of 96 sections according to the documentation
@@ -229,13 +213,13 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     if (ntHeader.FileHeader.NumberOfSections > 96)
     {
         LPE_LOG("Bad number of sections (IMAGE_SECTION_HEADER) (limit is 96, found %d)\n", ntHeader.FileHeader.NumberOfSections);
-        return close_win32_exe(result, file, LPE_BAD_NUMBER_OF_IMAGE_SECTION_HEADER);
+        return close_win32_exe(file, LPE_BAD_NUMBER_OF_IMAGE_SECTION_HEADER);
     }
 
     if (fread(sections, sizeof(IMAGE_SECTION_HEADER), ntHeader.FileHeader.NumberOfSections, file) != ntHeader.FileHeader.NumberOfSections)
     {
         LPE_LOG("Failed to read section headers (IMAGE_SECTION_HEADER)\n");
-        return close_win32_exe(result, file, LPE_READ_IMAGE_SECTION_HEADER_FAILED);
+        return close_win32_exe(file, LPE_READ_IMAGE_SECTION_HEADER_FAILED);
     }
 
     IMAGE_SECTION_HEADER* entryPointSection = NULL;
@@ -253,7 +237,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
         {
             LPE_LOG("Bad IMAGE_SECTION_HEADER offset / size (points beyond the size of the binary). Offset: %d size: %d",
                 section->PointerToRawData, section->SizeOfRawData);
-            return close_win32_exe(result, file, LPE_BAD_IMAGE_SECTION_HEADER_DATA_RANGE);
+            return close_win32_exe(file, LPE_BAD_IMAGE_SECTION_HEADER_DATA_RANGE);
         }
 
         // Ensure the virtual address doesn't point outside of OptionalHeader.SizeOfImage (as we depend on this in a memcpy below)
@@ -262,7 +246,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
         if (section->VirtualAddress + section->SizeOfRawData > ntHeader.OptionalHeader.SizeOfImage)
         {
             LPE_LOG("IMAGE_SECTION_HEADER has a bad VirtualAddress pointing outside of OptionalHeader.SizeOfImage\n");
-            return close_win32_exe(result, file, LPE_BAD_IMAGE_SECTION_HEADER_VIRTUAL_ADDRESS);
+            return close_win32_exe(file, LPE_BAD_IMAGE_SECTION_HEADER_VIRTUAL_ADDRESS);
         }
 
         // Find where all of the sections end, this is useful to check for additional file padding / hidden data
@@ -287,7 +271,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
         if (dataDir->VirtualAddress + dataDir->Size > ntHeader.OptionalHeader.SizeOfImage)
         {
             LPE_LOG("IMAGE_DATA_DIRECTORY has a bad VirtualAddress pointing outside of OptionalHeader.SizeOfImage\n");
-            return close_win32_exe(result, file, LPE_BAD_IMAGE_DATA_DIRECTORY_VIRTUAL_ADDRESS);
+            return close_win32_exe(file, LPE_BAD_IMAGE_DATA_DIRECTORY_VIRTUAL_ADDRESS);
         }
     }
     
@@ -295,7 +279,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     if (try_get_file_size(file, &fileSize) != 0)
     {
         LPE_LOG("Failed to get the exe file size\n");
-        return close_win32_exe(result, file, LPE_GET_FILE_SIZE_FAILED);
+        return close_win32_exe(file, LPE_GET_FILE_SIZE_FAILED);
     }
 
     if (isMainModule)
@@ -304,7 +288,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
         if (memmgr_get_base_virtual_address(&cpu->Memory) != 0)
         {
             LPE_LOG("Base virtual address already set in memmgr\n");
-            return close_win32_exe(result, file, LPE_BASE_VIRTUAL_ADDRESS_ALREADY_ASSIGNED);
+            return close_win32_exe(file, LPE_BASE_VIRTUAL_ADDRESS_ALREADY_ASSIGNED);
         }
         memmgr_set_base_virtual_address(&cpu->Memory, ntHeader.OptionalHeader.ImageBase);
     }
@@ -315,7 +299,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     if (moduleMemory == NULL)
     {
         LPE_LOG("Failed to allocate memory for the module '%s'. isMainModule: %d\n", fileName, isMainModule);
-        return close_win32_exe(result, file, LPE_ALLOCATE_VIRTUAL_MEMORY_FAILED);
+        return close_win32_exe(file, LPE_ALLOCATE_VIRTUAL_MEMORY_FAILED);
     }
     // Align the module address (don't do this for the main module, as we will be loading directly at the desired address)
     size_t moduleMemoryVAddr = memmgr_get_virtual_address(&cpu->Memory, (size_t)moduleMemory);
@@ -331,7 +315,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     {
         LPE_LOG("mmgr is broken or something used the allocator before loading the binary. The binary must be the "
             "first entry in the virtual memory so that we can properly validate memory bounds.\n");
-        return close_win32_exe(result, file, LPE_INVALID_VIRTUAL_MEMORY);
+        return close_win32_exe(file, LPE_INVALID_VIRTUAL_MEMORY);
     }
     
     // Copy the PE header into the virtual process memory
@@ -339,12 +323,12 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     if (try_file_seek(file, 0, SEEK_SET) != 0)
     {
         LPE_LOG("Failed to seek to the start of the file\n");
-        return close_win32_exe(result, file, LPE_SEEK_FILE_START_FAILED);
+        return close_win32_exe(file, LPE_SEEK_FILE_START_FAILED);
     }
     if (fread(moduleMemory, 1, peHeaderSize, file) != peHeaderSize)
     {
         LPE_LOG("Failed to copy the Portable Executable header to the virtual process memory\n");
-        return close_win32_exe(result, file, LPE_COPY_PE_HEADER_FAILED);
+        return close_win32_exe(file, LPE_COPY_PE_HEADER_FAILED);
     }
 
     // Copy the data of each section into the virtual process memory
@@ -355,7 +339,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
         if (section->VirtualAddress == 0)
         {
             LPE_LOG("IMAGE_SECTION_HEADER virtual address will wipe over the PE header. This isn't allowed.\n");
-            return close_win32_exe(result, file, LPE_BAD_IMAGE_SECTION_HEADER_VIRTUAL_ADDRESS);
+            return close_win32_exe(file, LPE_BAD_IMAGE_SECTION_HEADER_VIRTUAL_ADDRESS);
         }
 
         if (section->SizeOfRawData > 0)
@@ -363,13 +347,13 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
             if (try_file_seek(file, section->PointerToRawData, SEEK_SET) != 0)
             {
                 LPE_LOG("Failed to seek to a IMAGE_SECTION_HEADER data offset\n");
-                return close_win32_exe(result, file, LPE_READ_IMAGE_SECTION_HEADER_DATA_FAILED);
+                return close_win32_exe(file, LPE_READ_IMAGE_SECTION_HEADER_DATA_FAILED);
             }
 
             if (fread(moduleMemory + section->VirtualAddress, 1, section->SizeOfRawData, file) != section->SizeOfRawData)
             {
                 LPE_LOG("Failed to read the data of a IMAGE_SECTION_HEADER\n");
-                return close_win32_exe(result, file, LPE_READ_IMAGE_SECTION_HEADER_DATA_FAILED);
+                return close_win32_exe(file, LPE_READ_IMAGE_SECTION_HEADER_DATA_FAILED);
             }
         }
     }
@@ -439,7 +423,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
         if (moduleMemory + moduleNameAddr >= moduleMemoryEnd)
         {
             LPE_LOG("IMAGE_EXPORT_DIRECTORY dll name pointer points outside the bounds of the binary.\n");
-            return close_win32_exe(result, file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_DLL_NAME);
+            return close_win32_exe(file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_DLL_NAME);
         }
         strcpy(moduleInfo->Name, (char*)(moduleMemory + moduleNameAddr));
         
@@ -452,7 +436,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
             if (moduleMemory + exportNameAddr >= moduleMemoryEnd)
             {
                 LPE_LOG("IMAGE_EXPORT_DIRECTORY dll export name points outside the bounds of the binary.\n");
-                return close_win32_exe(result, file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_NAME);
+                return close_win32_exe(file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_NAME);
             }
             
             char* exportName = (char*)(moduleMemory + exportNameAddr);
@@ -460,7 +444,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
             if (ordinal >= exportDir->NumberOfFunctions)
             {
                 LPE_LOG("IMAGE_EXPORT_DIRECTORY export ordinal index is larger than the number of functions.\n");
-                return close_win32_exe(result, file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_ORDINAL);
+                return close_win32_exe(file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_ORDINAL);
             }
             
             DWORD exportAddr = functionTable[ordinal];
@@ -475,7 +459,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                 if (moduleMemory + exportAddr >= moduleMemoryEnd)
                 {
                     LPE_LOG("IMAGE_EXPORT_DIRECTORY export address points outside the bounds of the binary.\n");
-                    return close_win32_exe(result, file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_ADDRESS);
+                    return close_win32_exe(file, LPE_BAD_IMAGE_EXPORT_DIRECTORY_ADDRESS);
                 }
                 
                 char targetFuncName[MAX_FUNC_NAME_LEN];
@@ -517,12 +501,19 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
         strcpy(moduleInfo->Name, path_to_short_path(fileName));
     }
     
-    // Add the module to modules collection
+#if PLATFORM_WINDOWS
+    if (!_fullpath(moduleInfo->Path, fileName, sizeof(moduleInfo->Path)))// == NULL)// hmm cl.exe seeing the return type as an int?
+#else
+    if (realpath(fileName, moduleInfo->Path) == NULL)
+#endif
     {
-        char moduleNameToLower[MAX_MODULE_NAME_LEN];
-        strcpylower(moduleNameToLower, moduleInfo->Name);
-        map_set(&cpu->Modules, moduleNameToLower, moduleInfo);
+        moduleInfo->Path[0] = '\0';
     }
+    
+    // Add the module to modules collection
+    char moduleNameToLower[MAX_MODULE_NAME_LEN];
+    strcpylower(moduleNameToLower, moduleInfo->Name);
+    map_set(&cpu->Modules, moduleNameToLower, moduleInfo);
     
     // Handle dll imports
     map_int_t modulesToLoad;
@@ -537,7 +528,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
             if (moduleMemory + importDescriptor->Name >= moduleMemoryEnd)
             {
                 LPE_LOG("IMAGE_IMPORT_DESCRIPTOR dll name points outside the bounds of the binary.\n");
-                return close_win32_exe(result, file, LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_NAME);
+                return close_win32_exe(file, LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_NAME);
             }
 
             // Get the name of the dll
@@ -561,7 +552,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                 moduleMemory + importDescriptor->OriginalFirstThunk + sizeof(size_t) >= moduleMemoryEnd)
             {
                 LPE_LOG("IMAGE_IMPORT_DESCRIPTOR has virtual addresses which points outside the bounds of the binary.\n");
-                return close_win32_exe(result, file, LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_VIRTUAL_ADDRESS);
+                return close_win32_exe(file, LPE_BAD_IMAGE_IMPORT_DESCRIPTOR_VIRTUAL_ADDRESS);
             }
             else
             {
@@ -574,6 +565,9 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                     // The value doesn't matter, we are just using it as a hashset
                     map_set(&modulesToLoad, importDllNameToLower, 0);
                 }
+                
+                // For self dll imports prefer the internal definition (so that you can define a custom definition and which then calls the internal one)
+                int32_t isSelfDllImport = strcmp(moduleNameToLower, importDllNameToLower) == 0;
                 
                 // NOTE: The following currently assumes that BOTH FirstThunk and OriginalFirstThunk are assigned in the file.
                 // These are really IMAGE_THUNK_DATA*
@@ -618,7 +612,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                         if (moduleMemory + originalThunkNameVA + sizeof(IMAGE_IMPORT_BY_NAME) >= moduleMemoryEnd)
                         {   
                             LPE_LOG("IMAGE_IMPORT_BY_NAME string points outside of the bounds of the binary\n");
-                            return close_win32_exe(result, file, LPE_BAD_IMAGE_IMPORT_BY_NAME);
+                            return close_win32_exe(file, LPE_BAD_IMAGE_IMPORT_BY_NAME);
                         }
                         
                         IMAGE_IMPORT_BY_NAME* importByName = (IMAGE_IMPORT_BY_NAME*)(moduleMemory + originalThunkNameVA);
@@ -627,7 +621,7 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                         // Try finding the import from mapped modules, otherwise look at the manually implemented imports
                         strcat(mappedImportName, importName);
                         uint32_t* mappedImportAddr = map_get(&cpu->ModuleExportsMap, mappedImportName);
-                        if (mappedImportAddr != NULL)
+                        if (!isSelfDllImport && mappedImportAddr != NULL)
                         {
                             *thunkData = (DWORD)(*mappedImportAddr);
                             printf("Resolved import (mapped) %s %s\n", importDllName, importName);
@@ -639,6 +633,11 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
                             {
                                 import->ThunkAddress = (uint32_t)cpu_get_virtual_address(cpu, thunkData);
                                 printf("Resolved import %s %s\n", importDllName, importName);
+                            }
+                            else if (isSelfDllImport && mappedImportAddr != NULL)
+                            {
+                                *thunkData = (DWORD)(*mappedImportAddr);
+                                printf("Resolved import (mapped) %s %s\n", importDllName, importName);
                             }
                             else
                             {
@@ -673,9 +672,8 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
         ModuleInfo** existingModule = map_get(&cpu->Modules, key);
         if (existingModule == NULL)
         {
-            ExeLoadResult dllLoadResult;
             ModuleInfo* dllModuleInfo;
-            load_win32_exe(cpu, &dllLoadResult, key, &dllModuleInfo);
+            load_win32_exe(cpu, key, &dllModuleInfo);
             if (dllModuleInfo != NULL)
             {
                 map_set(&cpu->Modules, key, dllModuleInfo);
@@ -692,22 +690,16 @@ ExeLoadResult* load_win32_exe_internal(CPU* cpu, ExeLoadResult* result, const ch
     // Global Descriptor Table (GDT)
     // Local Descriptor Table (LDT)
 
-    if (isMainModule)
-    {
-        result->ErrorCode = 0;
-        result->Address = (size_t)moduleMemory;
-        result->AddressOfEntryPoint = result->Address + ntHeader.OptionalHeader.AddressOfEntryPoint;
-        result->VirtualAddress = ntHeader.OptionalHeader.ImageBase;
-        result->VirtualAddressOfEntryPoint = result->VirtualAddress + ntHeader.OptionalHeader.AddressOfEntryPoint;
-        result->ImageSize = ntHeader.OptionalHeader.SizeOfImage;
-    }
+    moduleInfo->VirtualAddress = cpu_get_virtual_address(cpu, moduleMemory);
+    moduleInfo->VirtualAddressOfEntryPoint = moduleInfo->VirtualAddress + ntHeader.OptionalHeader.AddressOfEntryPoint;
+    moduleInfo->ImageSize = ntHeader.OptionalHeader.SizeOfImage;
 
-    return close_win32_exe(result, file, 0);
+    return close_win32_exe(file, 0);
 }
 
 int main()
 {
-    const char* fileName = "main_file_tests.exe";//"C:\\main.exe";
+    const char* fileName = "i386-win32-tcc.exe";//"main_file_tests.exe";//"C:\\main.exe";
     
     CPU cpu;
     cpu_init(&cpu);
@@ -724,9 +716,8 @@ int main()
     }
     printf("Total memory size: %08x (%llu)\n", totalMemorySize, (uint64_t)totalMemorySize);
     
-    ExeLoadResult loadResult;
-    load_win32_exe(&cpu, &loadResult, fileName, &cpu.MainModule);
-    if (loadResult.ErrorCode != 0 || cpu.ErrorCode != 0)
+    int loadExeErrorCode = load_win32_exe(&cpu, fileName, &cpu.MainModule);
+    if (loadExeErrorCode != 0 || cpu.ErrorCode != 0)
     {
         printf("Load exe failed.\n");
         cpu_destroy(&cpu);
@@ -734,9 +725,9 @@ int main()
         return 1;
     }
     
-    printf("EOP: 0x%08X\n", loadResult.VirtualAddressOfEntryPoint);
+    printf("EOP: 0x%08X\n", cpu.MainModule->VirtualAddressOfEntryPoint);
     
-    cpu_init_state(&cpu, (uint32_t)loadResult.VirtualAddress, (uint32_t)loadResult.VirtualAddressOfEntryPoint, (uint32_t)loadResult.ImageSize, (uint32_t)heapSize, (uint32_t)stackSize);
+    cpu_init_state(&cpu, cpu.MainModule->VirtualAddress, cpu.MainModule->VirtualAddressOfEntryPoint, cpu.MainModule->ImageSize, (uint32_t)heapSize, (uint32_t)stackSize);
     if (cpu.ErrorCode != 0)
     {
         printf("cpu_init_state failed.\n");
@@ -744,6 +735,9 @@ int main()
         getchar();
         return 2;
     }
+    
+    cpu_add_command_line_arg(&cpu, cpu.MainModule->Path);// Exe path is always the first arg
+    cpu_add_command_line_arg(&cpu, "hello.c");
     
     if (setjmp(cpu.JmpBuf) == 0 && cpu.ErrorCode == 0)
     {
