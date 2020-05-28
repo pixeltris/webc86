@@ -9,7 +9,7 @@
 // TODO: printf currently gets chopped up. This will cause issues on threaded programs. Fix this.
 // TODO: scanf %p (and possibly other specifiers) will write 8 bytes on x64 platforms. This needs to be 4 bytes.
 //       To fix this we need to pre-process the fmt arg and find which args are 8 bytes on x64 and 4 bytes on x86. Then remap them.
-// TODO: socket structs probably need to be converted (likely size differences on x64) - especially select(). also constants differences (socket options, etc) - see wine ws2_32/socket.c
+// TODO: socket structs probably need to be converted (likely size differences on x64) - especially select(). also constants differences (socket options, etc) - see Wine ws2_32/socket.c
 // TODO: threading
 // TODO: signals
 // TODO: pipes?
@@ -247,6 +247,7 @@ void crt_calloc(CPU* cpu);
 void crt_div(CPU* cpu);
 void crt__ecvt(CPU* cpu);
 void crt_exit(CPU* cpu);
+void crt__exit(CPU* cpu);
 void crt__fcvt(CPU* cpu);
 void crt_free(CPU* cpu);
 void crt__gcvt(CPU* cpu);

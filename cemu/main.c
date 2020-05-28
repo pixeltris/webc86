@@ -697,9 +697,13 @@ int load_win32_exe_internal(CPU* cpu, const char* fileName, ModuleInfo* moduleIn
     return close_win32_exe(file, 0);
 }
 
-int main()
+int main(int argc, char** argv)
 {
     const char* fileName = "i386-win32-tcc.exe";//"main_file_tests.exe";//"C:\\main.exe";
+    if (argc > 1)
+    {
+        fileName = (const char*)argv[1];
+    }
     
     CPU cpu;
     cpu_init(&cpu);
@@ -719,7 +723,7 @@ int main()
     int loadExeErrorCode = load_win32_exe(&cpu, fileName, &cpu.MainModule);
     if (loadExeErrorCode != 0 || cpu.ErrorCode != 0)
     {
-        printf("Load exe failed.\n");
+        printf("Load exe failed %d.\n", loadExeErrorCode);
         cpu_destroy(&cpu);
         getchar();
         return 1;
@@ -739,12 +743,14 @@ int main()
     cpu_add_command_line_arg(&cpu, cpu.MainModule->Path);// Exe path is always the first arg
     cpu_add_command_line_arg(&cpu, "hello.c");
     
+    uint64_t inst = 0;
     if (setjmp(cpu.JmpBuf) == 0 && cpu.ErrorCode == 0)
     {
         cpu.JmpBufInitialized = 1;
         while (!cpu.Complete)
         {
             cpu_execute_instruction(&cpu);
+            inst++;
         }
     }
     
@@ -752,7 +758,7 @@ int main()
     
     if (cpu.ErrorCode == 0)
     {
-        printf("done\n");
+        printf("done. instructions: %llu\n", inst);
     }
     else
     {

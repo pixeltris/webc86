@@ -166,7 +166,6 @@ void crt_init_imports(CPU* cpu, int32_t* counter)
     cpu_define_data_import(cpu, counter, MSVCRT_DLL, "_environ", 4);// char**
     //cpu_define_data_import(cpu, counter, MSVCRT_DLL, "_wenviron", 4);// wchar_t**
     cpu_define_data_import(cpu, counter, MSVCRT_DLL, "_iob", SIZEOF_FILE * IOB_NUM);// 20 FILE entries
-    cpu_define_data_import(cpu, counter, MSVCRT_DLL, "____errno", 4);// This isn't real
     
     /////////////////////////////////
     // assert.h
@@ -387,6 +386,7 @@ void crt_init_imports(CPU* cpu, int32_t* counter)
     cpu_define_import(cpu, counter, MSVCRT_DLL, "div", crt_div);
     //cpu_define_import(cpu, counter, MSVCRT_DLL, "_ecvt", crt__ecvt);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "exit", crt_exit);
+    cpu_define_import(cpu, counter, MSVCRT_DLL, "_exit", crt_exit);
     //cpu_define_import(cpu, counter, MSVCRT_DLL, "_fcvt", crt__fcvt);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "free", crt_free);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "gcvt", crt__gcvt);
@@ -429,7 +429,7 @@ void crt_init_imports(CPU* cpu, int32_t* counter)
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strcpy", crt_strcpy);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strcspn", crt_strcspn);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "_strdup", crt__strdup);
-    //cpu_define_import(cpu, counter, MSVCRT_DLL, "strerror", crt_strerror);
+    cpu_define_import(cpu, counter, MSVCRT_DLL, "strerror", crt_strerror);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "_stricmp", crt__stricmp);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "strlen", crt_strlen);
     cpu_define_import(cpu, counter, MSVCRT_DLL, "_strlwr", crt__strlwr);
@@ -529,6 +529,22 @@ void crt_allocate_data_imports(CPU* cpu)
         *(uint32_t*)(data + (SIZEOF_FILE * 0)) = handles_create(&cpu->FileHandles, (void*)stdin);
         *(uint32_t*)(data + (SIZEOF_FILE * 1)) = handles_create(&cpu->FileHandles, (void*)stdout);
         *(uint32_t*)(data + (SIZEOF_FILE * 2)) = handles_create(&cpu->FileHandles, (void*)stderr);
+    }
+}
+
+void crt_update_static_str(CPU* cpu, uint32_t* addr, size_t size)
+{
+    if (*addr == 0)
+    {
+        *addr = cpu_get_virtual_address(cpu, memmgr_alloc(&cpu->Memory, size));
+    }
+    else
+    {
+        char* ptr = (char*)cpu_get_real_address(cpu, *addr);
+        if (strlen(ptr) < size)
+        {
+            *addr = cpu_get_virtual_address(cpu, memmgr_realloc(&cpu->Memory, ptr, size));
+        }
     }
 }
 
@@ -811,10 +827,12 @@ void crt__getdrives(CPU* cpu)
 
 void crt__errno(CPU* cpu)
 {
-    ImportInfo* import = cpu_find_import(cpu, MSVCRT_DLL"_""____errno");
-    if (import != NULL && import->DataAddress != 0)
+    // This only gives us readonly access to errno... (TODO: Only update errno after calls to real functions?)
+    crt_update_static_var(cpu, &cpu->Statics_errno, 4);
+    if (cpu->Statics_errno != 0)
     {
-        CPU_STACK_RETURN(cpu, import->DataAddress);
+        cpu_writeU32(cpu, cpu->Statics_errno, errno);
+        CPU_STACK_RETURN(cpu, cpu->Statics_errno);
     }
     else
     {
@@ -2951,7 +2969,29 @@ void crt__strdup(CPU* cpu)
 
 void crt_strerror(CPU* cpu)
 {
-    // TODO
+    CPU_STACK_BEGIN(cpu);
+    int32_t errnum = CPU_STACK_POP_I32(cpu);
+    
+    // There are going to be differences on different platforms, but there isn't a great way of implementing this
+    // without tampering with errno (which is what is mostly passed into strerror)
+    char* str = strerror(errnum);
+    if (str != NULL)
+    {
+        crt_update_static_str(cpu, &cpu->Statics_streerror, strlen(str) + 1);
+        if (cpu->Statics_streerror != 0)
+        {
+            strcpy(cpu_get_real_address(cpu, cpu->Statics_streerror), str);
+            CPU_STACK_RETURN(cpu, cpu->Statics_streerror);
+        }
+        else
+        {
+            CPU_STACK_RETURN(cpu, 0);
+        }
+    }
+    else
+    {
+        CPU_STACK_RETURN(cpu, 0);
+    }
 }
 
 void crt__stricmp(CPU* cpu)

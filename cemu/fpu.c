@@ -39,7 +39,7 @@ int32_t fpu_load_status_word(CPU* cpu)
 void fpu_stack_fault(CPU* cpu)
 {
     cpu->Fpu.StatusWord |= FPU_EX_SF | FPU_EX_I;
-    cpu_onerror(cpu, "fpu_stack_fault\n");
+    cpu_onerror(cpu, "fpu_stack_fault eip: %08X\n", cpu->EIP);
 }
 
 void fpu_invalid_arithmatic(CPU* cpu)
@@ -632,6 +632,7 @@ int32_t fpu_op_DE_reg(CPU* cpu, uint8_t imm8)
             if (low == 1)
             {
                 fpu_fcom(cpu, cpu->Fpu.St[low_ptr].fp);
+                fpu_pop(cpu);
                 fpu_pop(cpu);
             }
             else

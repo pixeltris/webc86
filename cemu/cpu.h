@@ -209,9 +209,11 @@ struct tCPU
     HandleCollection ThreadHandles;
     
     uint32_t AtExitFuncPtr;// For atexit()
-    // These should be per thread...
+    // These should be per thread... (and probably inside a struct)
     uint32_t Statics_tmpname;// char* size L_tmpnam
     uint32_t Statics_inet_ntoa;// char* size 16
+    uint32_t Statics_streerror;// char* size varies
+    uint32_t Statics_errno;
     
     FPU Fpu;
     
